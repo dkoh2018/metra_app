@@ -10,6 +10,7 @@ const TrainMap = lazy(() => import('@/components/TrainMap'));
 
 type DayType = 'weekday' | 'saturday' | 'sunday';
 type Direction = 'inbound' | 'outbound';
+type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
 
 // API response types
 interface ApiTrain {
@@ -38,6 +39,24 @@ interface ApiAlerts {
 // Cache compiled regex patterns for better performance
 const TRIP_ID_REGEX = /UNW(\d+)/;
 const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
+const CROWDING_BADGE_STYLES: Record<CrowdingLevel, string> = {
+  low: "bg-green-100 text-green-700",
+  some: "bg-amber-200 text-amber-800",
+  moderate: "bg-orange-100 text-orange-700",
+  high: "bg-red-100 text-red-700"
+};
+const CROWDING_DOT_STYLES: Record<CrowdingLevel, string> = {
+  low: "bg-green-600",
+  some: "bg-amber-500",
+  moderate: "bg-orange-500",
+  high: "bg-red-700"
+};
+const CROWDING_LABELS: Record<CrowdingLevel, string> = {
+  low: "Low",
+  some: "Some",
+  moderate: "Moderate",
+  high: "High"
+};
 
 function formatPredictedTimeDisplay(timeStr?: string | null): string | null {
   if (!timeStr) return null;
@@ -172,7 +191,7 @@ export default function Schedule() {
     stop_id: string;
   }>>(new Map());
   const [tripIdMap, setTripIdMap] = useState<Map<string, string>>(new Map());
-  const [crowdingData, setCrowdingData] = useState<Map<string, 'low' | 'medium' | 'high'>>(new Map());
+  const [crowdingData, setCrowdingData] = useState<Map<string, CrowdingLevel>>(new Map());
   const [showDelayDebug, setShowDelayDebug] = useState(false);
   const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
   const lastFetchMinuteRef = useRef<number | null>(null);
@@ -384,9 +403,9 @@ export default function Schedule() {
       
       Promise.all([palatineToChicago, chicagoToPalatine])
         .then(([palatineData, chicagoData]) => {
-          const crowdingMap = new Map<string, 'low' | 'medium' | 'high'>();
+          const crowdingMap = new Map<string, CrowdingLevel>();
           
-          palatineData.crowding?.forEach((item: { trip_id: string; crowding: 'low' | 'medium' | 'high' }) => {
+          palatineData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
               const trainNumber = match[1];
@@ -395,7 +414,7 @@ export default function Schedule() {
             }
           });
           
-          chicagoData.crowding?.forEach((item: { trip_id: string; crowding: 'low' | 'medium' | 'high' }) => {
+          chicagoData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
               const trainNumber = match[1];
@@ -880,13 +899,9 @@ export default function Schedule() {
                   {crowdingLevel && (
                     <span className={cn(
                       "px-2 py-0.5 rounded text-[10px] font-semibold uppercase",
-                      crowdingLevel === 'low' 
-                        ? "bg-green-100 text-green-700" 
-                        : crowdingLevel === 'medium'
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-red-100 text-red-700"
+                      CROWDING_BADGE_STYLES[crowdingLevel],
                     )}>
-                      {crowdingLevel === 'low' ? 'Low' : crowdingLevel === 'medium' ? 'Mod' : 'High'}
+                      {crowdingLevel === 'moderate' ? 'Mod' : CROWDING_LABELS[crowdingLevel]}
                     </span>
                   )}
                   {nextTrain.isExpress && (
@@ -1057,7 +1072,7 @@ const ScheduleTable = memo(function ScheduleTable({
   tripIdMap: Map<string, string>,
   delays: Map<string, number>,
   predictedTimes: Map<string, { scheduled?: string; predicted?: string; stop_id: string }>,
-  crowdingData: Map<string, 'low' | 'medium' | 'high'>,
+  crowdingData: Map<string, CrowdingLevel>,
   calculateDuration: (dep: string, arr: string) => number,
   currentTime: Date,
   direction: Direction,
@@ -1388,17 +1403,23 @@ const ScheduleTable = memo(function ScheduleTable({
               )}>
                 {/* Crowding indicator dot */}
                 {(() => {
-                  const crowdingLevel = tripId 
+                  const crowdingLevel = tripId
                     ? (crowdingData.get(tripId) || crowdingData.get(train.id))
                     : crowdingData.get(train.id);
-                  
+
                   return crowdingLevel ? (
                     <span className={cn(
                       "w-2 h-2 rounded-full shrink-0",
-                      crowdingLevel === 'low' ? "bg-green-600" 
-                        : crowdingLevel === 'medium' ? "bg-orange-500"
-                        : "bg-red-700"
-                    )} title={crowdingLevel === 'low' ? 'Low crowding' : crowdingLevel === 'medium' ? 'Moderate crowding' : 'High crowding'} />
+                      CROWDING_DOT_STYLES[crowdingLevel],
+                    )} title={
+                      crowdingLevel === 'some'
+                        ? 'Some crowding'
+                        : crowdingLevel === 'moderate'
+                        ? 'Moderate crowding'
+                        : crowdingLevel === 'high'
+                        ? 'High crowding'
+                        : 'Low crowding'
+                    } />
                   ) : null;
                 })()}
                 {train.id}

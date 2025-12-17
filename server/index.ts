@@ -455,6 +455,8 @@ async function startServer() {
       }
     });
 
+    type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
+
     // Fetch crowding data from Metra's website
     app.get("/api/crowding", async (req, res) => {
       let browser: any = null;
@@ -474,7 +476,7 @@ async function startServer() {
         }>) => {
           const crowding = cachedData
             .filter(item => item.crowding)
-            .map(item => ({ trip_id: item.trip_id, crowding: item.crowding as 'low' | 'medium' | 'high' }));
+            .map(item => ({ trip_id: item.trip_id, crowding: item.crowding as CrowdingLevel }));
           
           return { crowding };
         };
@@ -586,25 +588,26 @@ async function startServer() {
             
             const extractedData = await page.evaluate(() => {
               const trainRows = Array.from(document.querySelectorAll('.trip-row'));
-              const crowdingResults: Array<{ trip_id: string; crowding: 'low' | 'medium' | 'high' }> = [];
+              const crowdingResults: Array<{ trip_id: string; crowding: CrowdingLevel }> = [];
               
               trainRows.forEach((row: Element) => {
                 const tripId = row.getAttribute('id');
                 if (!tripId) return;
                 
-                const crowdingLow = row.querySelector('.trip--crowding-low');
-                const crowdingModerate = row.querySelector('.trip--crowding-moderate');
                 const crowdingSome = row.querySelector('.trip--crowding-some');
-                const crowdingMedium = row.querySelector('.trip--crowding-medium');
+                const crowdingModerate = row.querySelector('.trip--crowding-moderate');
                 const crowdingHigh = row.querySelector('.trip--crowding-high');
-                
-                let crowding: 'low' | 'medium' | 'high' | null = null;
-                if (crowdingLow) {
-                  crowding = 'low';
-                } else if (crowdingModerate || crowdingSome || crowdingMedium) {
-                  crowding = 'medium';
-                } else if (crowdingHigh) {
+                const genericCrowding = row.querySelector('.trip--crowding');
+
+                let crowding: CrowdingLevel | null = null;
+                if (crowdingHigh) {
                   crowding = 'high';
+                } else if (crowdingModerate) {
+                  crowding = 'moderate';
+                } else if (crowdingSome) {
+                  crowding = 'some';
+                } else if (genericCrowding) {
+                  crowding = 'low';
                 }
                 
                 if (crowding) {
@@ -637,7 +640,7 @@ async function startServer() {
                   WHERE origin = ? AND destination = ? AND updated_at < datetime('now', '-24 hours')
                 `).run(origin, destination);
                 
-                extractedData.crowding.forEach((item: { trip_id: string; crowding: 'low' | 'medium' | 'high' }) => {
+                extractedData.crowding.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
                   insertCache.run(
                     origin,
                     destination,
