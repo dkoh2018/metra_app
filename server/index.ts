@@ -530,56 +530,14 @@ async function startServer() {
             const executablePath = await ensureChromeExecutable();
             
             let firstTrainTimestamp: number;
-            
+
             try {
-              const { getDatabase: getDbForTimestamp } = await import("./db/schema.js");
-              const dbForTimestamp = getDbForTimestamp();
-              
               const now = new Date();
-              const dayOfWeek = now.getDay();
-              let dayType: 'weekday' | 'saturday' | 'sunday';
-              if (dayOfWeek === 0) dayType = 'sunday';
-              else if (dayOfWeek === 6) dayType = 'saturday';
-              else dayType = 'weekday';
-              
-              let dayColumn = '';
-              if (dayType === 'weekday') {
-                dayColumn = 'monday = 1 AND saturday = 0 AND sunday = 0';
-              } else if (dayType === 'saturday') {
-                dayColumn = 'saturday = 1';
-              } else {
-                dayColumn = 'sunday = 1';
-              }
-              
-              const serviceIds = db.prepare(`
-                SELECT service_id FROM service_calendar WHERE ${dayColumn}
-              `).all() as Array<{ service_id: string }>;
-              
-              const serviceIdList = serviceIds.map(s => s.service_id);
-              
-              if (serviceIdList.length > 0) {
-                const placeholders = serviceIdList.map(() => '?').join(',');
-                const stopId = origin === 'PALATINE' ? 'PALATINE' : 'OTC';
-                
-                const firstTrain = db.prepare(`
-                  SELECT MIN(departure_time) as first_time
-                  FROM schedules
-                  WHERE stop_id = ?
-                    AND direction = ?
-                    AND service_id IN (${placeholders})
-                `).get(stopId, origin === 'PALATINE' ? 'inbound' : 'outbound', ...serviceIdList) as { first_time: string } | undefined;
-                
-                if (firstTrain?.first_time) {
-                  const [hours, minutes] = firstTrain.first_time.split(':').map(Number);
-                  const firstTrainDate = new Date(now);
-                  firstTrainDate.setHours(hours, minutes, 0, 0);
-                  firstTrainTimestamp = Math.floor(firstTrainDate.getTime() / 1000);
-                } else {
-                  firstTrainTimestamp = Math.floor(now.getTime() / 1000);
-                }
-              } else {
-                firstTrainTimestamp = Math.floor(now.getTime() / 1000);
-              }
+              const chicagoNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+
+              chicagoNow.setHours(3, 0, 0, 0);
+
+              firstTrainTimestamp = Math.floor(chicagoNow.getTime() / 1000);
             } catch (dbError) {
               const now = new Date();
               firstTrainTimestamp = Math.floor(now.getTime() / 1000);
