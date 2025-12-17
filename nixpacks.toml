@@ -3,10 +3,10 @@
 nixPkgs = ["nodejs_20", "python311", "python311Packages.setuptools", "gcc", "gnumake"]
 
 [phases.install]
-cmds = ["npm install -g pnpm && pnpm install --frozen-lockfile"]
+cmds = ["npm install --legacy-peer-deps"]
 
 [phases.build]
-cmds = ["pnpm run build"]
+cmds = ["npm run build"]
 
 [start]
-cmd = "pnpm run start"
+cmd = "npm run start"
