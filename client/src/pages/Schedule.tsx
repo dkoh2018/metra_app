@@ -115,8 +115,8 @@ function isPredictedTimeReasonable(
   if (predictedMinutes === null) return false;
 
   const scheduledMinutes =
-    getChicagoMinutesFromTimeString(scheduled) ??
-    getChicagoMinutesFromTimeString(fallbackScheduleTime);
+    getChicagoMinutesFromTimeString(fallbackScheduleTime) ??
+    getChicagoMinutesFromTimeString(scheduled);
 
   if (scheduledMinutes === null) return true;
 
@@ -1109,8 +1109,11 @@ const ScheduleTable = memo(function ScheduleTable({
           if (nextTrainRef.current && scrollContainerRef.current) {
             const container = scrollContainerRef.current;
             const nextTrainElement = nextTrainRef.current;
-            
-            const scrollPosition = nextTrainElement.offsetTop;
+
+            const containerRect = container.getBoundingClientRect();
+            const nextTrainRect = nextTrainElement.getBoundingClientRect();
+
+            const scrollPosition = nextTrainRect.top - containerRect.top + container.scrollTop;
             
             container.scrollTo({
               top: Math.max(0, scrollPosition - 8),
