@@ -68,8 +68,64 @@ function calculateDuration(departureTime: string, arrivalTime: string): number {
   if (arrTotalMinutes < depTotalMinutes) {
     arrTotalMinutes += 24 * 60;
   }
-  
+
   return arrTotalMinutes - depTotalMinutes;
+}
+
+function getChicagoMinutesFromTimeString(timeStr?: string | null): number | null {
+  if (!timeStr) return null;
+
+  const maybeIsoDate = timeStr.match(/\d{4}-\d{2}-\d{2}/);
+  let date: Date | null = null;
+
+  if (maybeIsoDate) {
+    const parsed = new Date(timeStr);
+    date = isNaN(parsed.getTime()) ? null : parsed;
+  } else {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    const now = getChicagoTime();
+    now.setHours(hours, minutes, 0, 0);
+    date = now;
+  }
+
+  if (!date) return null;
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false
+  }).formatToParts(date);
+
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+
+  return hour * 60 + minute;
+}
+
+function isPredictedTimeReasonable(
+  predicted?: string | null,
+  scheduled?: string | null,
+  fallbackScheduleTime?: string
+): boolean {
+  if (!predicted) return false;
+
+  const predictedMinutes = getChicagoMinutesFromTimeString(predicted);
+  if (predictedMinutes === null) return false;
+
+  const scheduledMinutes =
+    getChicagoMinutesFromTimeString(scheduled) ??
+    getChicagoMinutesFromTimeString(fallbackScheduleTime);
+
+  if (scheduledMinutes === null) return true;
+
+  let diff = Math.abs(predictedMinutes - scheduledMinutes);
+  if (diff > 720) {
+    diff = Math.min(diff, 1440 - diff);
+  }
+
+  return diff <= 180; // ignore obviously wrong data (>3 hours off)
 }
 
 export default function Schedule() {
@@ -701,8 +757,28 @@ export default function Schedule() {
           const predictedDepartureData = tripId ? predictedTimes.get(`${tripId}_departure`) : null;
           const predictedArrivalData = tripId ? predictedTimes.get(`${tripId}_arrival`) : null;
           
+          const usePredictedDeparture =
+            predictedDepartureData?.predicted &&
+            isPredictedTimeReasonable(
+              predictedDepartureData.predicted,
+              predictedDepartureData.scheduled,
+              nextTrain.departureTime
+            );
+
+          const usePredictedArrival =
+            predictedArrivalData?.predicted &&
+            isPredictedTimeReasonable(
+              predictedArrivalData.predicted,
+              predictedArrivalData.scheduled,
+              nextTrain.arrivalTime
+            );
+
           let delayMinutes: number | null = null;
-          if (predictedDepartureData?.predicted && predictedDepartureData?.scheduled) {
+          if (
+            usePredictedDeparture &&
+            predictedDepartureData?.scheduled &&
+            predictedDepartureData?.predicted
+          ) {
             const scheduled = new Date(predictedDepartureData.scheduled);
             const predicted = new Date(predictedDepartureData.predicted);
             const diffMs = predicted.getTime() - scheduled.getTime();
@@ -731,7 +807,7 @@ export default function Schedule() {
             return minutesUntil >= 0 && minutesUntil < 24 * 60 ? minutesUntil : null;
           };
           
-          const departureTimeForCountdown = predictedDepartureData?.predicted
+          const departureTimeForCountdown = usePredictedDeparture && predictedDepartureData?.predicted
             ? (() => {
                 const predDate = new Date(predictedDepartureData.predicted);
                 const hours = predDate.getHours();
@@ -761,13 +837,13 @@ export default function Schedule() {
             return formatTime(timeStr);
           };
           
-          const predictedDeparture = predictedDepartureData?.predicted 
-            ? formatPredictedTimeForCard(predictedDepartureData.predicted) 
+          const predictedDeparture = usePredictedDeparture && predictedDepartureData?.predicted
+            ? formatPredictedTimeForCard(predictedDepartureData.predicted)
             : null;
           const scheduledDeparture = predictedDepartureData?.scheduled
             ? formatPredictedTimeForCard(predictedDepartureData.scheduled)
             : null;
-          const predictedArrival = predictedArrivalData?.predicted
+          const predictedArrival = usePredictedArrival && predictedArrivalData?.predicted
             ? formatPredictedTimeForCard(predictedArrivalData.predicted)
             : null;
           const scheduledArrival = predictedArrivalData?.scheduled
@@ -1171,21 +1247,41 @@ const ScheduleTable = memo(function ScheduleTable({
           const predictedArrivalData = tripId ? predictedTimes.get(`${tripId}_arrival`) : null;
           const departed = hasDeparted(train.departureTime);
           
-          const predictedDeparture = predictedDepartureData?.predicted 
-            ? formatPredictedTime(predictedDepartureData.predicted) 
+          const usePredictedDeparture =
+            predictedDepartureData?.predicted &&
+            isPredictedTimeReasonable(
+              predictedDepartureData.predicted,
+              predictedDepartureData.scheduled,
+              train.departureTime
+            );
+
+          const usePredictedArrival =
+            predictedArrivalData?.predicted &&
+            isPredictedTimeReasonable(
+              predictedArrivalData.predicted,
+              predictedArrivalData.scheduled,
+              train.arrivalTime
+            );
+
+          const predictedDeparture = usePredictedDeparture && predictedDepartureData?.predicted
+            ? formatPredictedTime(predictedDepartureData.predicted)
             : null;
           const scheduledDeparture = predictedDepartureData?.scheduled
             ? formatPredictedTime(predictedDepartureData.scheduled)
             : null;
-          const predictedArrival = predictedArrivalData?.predicted
+          const predictedArrival = usePredictedArrival && predictedArrivalData?.predicted
             ? formatPredictedTime(predictedArrivalData.predicted)
             : null;
           const scheduledArrival = predictedArrivalData?.scheduled
             ? formatPredictedTime(predictedArrivalData.scheduled)
             : null;
-          
+
           let delayMinutes: number | null = null;
-          if (predictedDepartureData?.predicted && predictedDepartureData?.scheduled) {
+          if (
+            usePredictedDeparture &&
+            predictedDepartureData?.predicted &&
+            predictedDepartureData?.scheduled
+          ) {
             const scheduled = new Date(predictedDepartureData.scheduled);
             const predicted = new Date(predictedDepartureData.predicted);
             const diffMs = predicted.getTime() - scheduled.getTime();
@@ -1262,7 +1358,7 @@ const ScheduleTable = memo(function ScheduleTable({
                   <span className="text-zinc-400">Gone</span>
                 ) : isNext ? (
                   (() => {
-                    const departureTimeForCountdown = predictedDeparture 
+                    const departureTimeForCountdown = predictedDeparture
                       ? (() => {
                           const predDate = new Date(predictedDepartureData!.predicted!);
                           return `${predDate.getHours().toString().padStart(2, '0')}:${predDate.getMinutes().toString().padStart(2, '0')}`;
