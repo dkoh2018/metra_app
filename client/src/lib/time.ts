@@ -8,9 +8,38 @@ const CHICAGO_TIMEZONE = 'America/Chicago';
 
 export function getChicagoTime(): Date {
   const now = new Date();
-  const options = { timeZone: CHICAGO_TIMEZONE };
-  const chicagoTimeStr = now.toLocaleString('en-US', options);
-  return new Date(chicagoTimeStr);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: CHICAGO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'short'
+  });
+
+  const parts = formatter.formatToParts(now);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find(p => p.type === type)?.value || '0';
+
+  const year = parseInt(get('year'), 10);
+  const month = parseInt(get('month'), 10);
+  const day = parseInt(get('day'), 10);
+  const hour = parseInt(get('hour'), 10);
+  const minute = parseInt(get('minute'), 10);
+  const second = parseInt(get('second'), 10);
+
+  // Parse timezone offset (e.g., "GMT-05" or "GMT-06") from the formatted parts
+  const tzName = get('timeZoneName');
+  const offsetMatch = tzName.match(/GMT([+-]\d{2})(:?\d{2})?/);
+  const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
+  const offsetMinutes = offsetMatch ? parseInt(offsetMatch[2]?.replace(':', '') || '0', 10) : 0;
+  const totalOffsetMinutes = offsetHours * 60 + Math.sign(offsetHours) * offsetMinutes;
+
+  // Construct a Date that represents the actual instant in Chicago time
+  const utcMillis = Date.UTC(year, month - 1, day, hour, minute, second);
+  return new Date(utcMillis - totalOffsetMinutes * 60 * 1000);
 }
 
 export function formatChicagoTime(date: Date, options?: Intl.DateTimeFormatOptions): string {
