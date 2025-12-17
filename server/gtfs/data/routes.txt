@@ -1,0 +1,12 @@
+route_id, route_short_name, route_long_name, route_desc, agency_id, route_type, route_color, route_text_color, route_url
+BNSF, BNSF, Burlington Northern, , METRA, 2, 29C233, 000000, https://metrarail.com/maps-schedules/train-lines/BNSF
+HC, HC, Heritage Corridor, , METRA, 2, 550E0C, FFFFFF, https://metrarail.com/maps-schedules/train-lines/HC
+MD-N, MD-N, Milwaukee North, , METRA, 2, CC5500, FFFFFF, https://metrarail.com/maps-schedules/train-lines/MD-N
+MD-W, MD-W, Milwaukee West, , METRA, 2, F1AD0E, 000000, https://metrarail.com/maps-schedules/train-lines/MD-W
+ME, ME, Metra Electric, , METRA, 2, EB5C00, FFFFFF, https://metrarail.com/maps-schedules/train-lines/ME
+NCS, NCS, North Central Service, , METRA, 2, 9785BC, FFFFFF, https://metrarail.com/maps-schedules/train-lines/NCS
+RI, RI, Rock Island, , METRA, 2, E02400, FFFFFF, https://metrarail.com/maps-schedules/train-lines/RI
+SWS, SWS, Southwest Service, , METRA, 2, 0042A8, FFFFFF, https://metrarail.com/maps-schedules/train-lines/SWS
+UP-N, UP-N, Union Pacific North, , METRA, 2, 008000, FFFFFF, https://metrarail.com/maps-schedules/train-lines/UP-N
+UP-NW, UP-NW, Union Pacific Northwest, , METRA, 2, FFE600, 000000, https://metrarail.com/maps-schedules/train-lines/UP-NW
+UP-W, UP-W, Union Pacific West, , METRA, 2, FE8D81, 000000, https://metrarail.com/maps-schedules/train-lines/UP-W
