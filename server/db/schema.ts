@@ -1,13 +1,20 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_PATH = path.resolve(__dirname, '../db/metra.db');
+const DB_PATH = path.resolve(__dirname, 'metra.db');
+const DB_DIR = path.dirname(DB_PATH);
 
 export function initDatabase(): Database.Database {
+  // Ensure database directory exists
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+  
   const db = new Database(DB_PATH);
   
   // Enable WAL mode for better concurrency
@@ -169,6 +176,11 @@ export function getDatabase(): Database.Database {
   }
   
   // Create new connection
+  // Ensure database directory exists
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+  
   dbInstance = new Database(DB_PATH);
   
   // Enable WAL mode for better concurrency
