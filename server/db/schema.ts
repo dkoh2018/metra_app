@@ -132,13 +132,21 @@ export function initDatabase(): Database.Database {
   `);
   
   // Create crowding_cache table - stores scraped crowding and delay data
+  const existingCrowdingTable = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='crowding_cache'"
+  ).get() as { sql?: string } | undefined;
+
+  if (existingCrowdingTable?.sql && !existingCrowdingTable.sql.includes("'some'")) {
+    db.exec("DROP TABLE IF EXISTS crowding_cache");
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS crowding_cache (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       origin TEXT NOT NULL,
       destination TEXT NOT NULL,
       trip_id TEXT NOT NULL,
-      crowding TEXT CHECK(crowding IN ('low', 'medium', 'high')),
+      crowding TEXT CHECK(crowding IN ('low', 'some', 'moderate', 'high')),
       scheduled_departure TEXT,
       predicted_departure TEXT,
       scheduled_arrival TEXT,
@@ -146,7 +154,7 @@ export function initDatabase(): Database.Database {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(origin, destination, trip_id)
     );
-    
+
     CREATE INDEX IF NOT EXISTS idx_crowding_origin_dest ON crowding_cache(origin, destination);
     CREATE INDEX IF NOT EXISTS idx_crowding_trip ON crowding_cache(trip_id);
     CREATE INDEX IF NOT EXISTS idx_crowding_updated ON crowding_cache(updated_at);
