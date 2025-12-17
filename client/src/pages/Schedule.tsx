@@ -39,6 +39,26 @@ interface ApiAlerts {
 const TRIP_ID_REGEX = /UNW(\d+)/;
 const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
 
+function formatPredictedTimeDisplay(timeStr?: string | null): string | null {
+  if (!timeStr) return null;
+
+  const asDate = new Date(timeStr);
+  if (!isNaN(asDate.getTime())) {
+    return formatChicagoTime(asDate, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const chicagoTime = getChicagoTime();
+    chicagoTime.setHours(hours, minutes, 0, 0);
+    return formatChicagoTime(chicagoTime, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  return null;
+}
+
 // Transform API train to frontend Train format
 function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string>): Train {
   // Extract train number from trip_id (e.g., "UP-NW_UNW634_V3_A" -> "634")
@@ -818,23 +838,7 @@ export default function Schedule() {
           const minutesUntil = getMinutesUntilDeparture(departureTimeForCountdown);
           
           const formatPredictedTimeForCard = (timeStr: string) => {
-            if (!timeStr) return null;
-            if (timeStr.includes('T')) {
-              const timePart = timeStr.split('T')[1]?.split('.')[0] || timeStr.split('T')[1] || '';
-              const [hours, minutes] = timePart.split(':').map(Number);
-              const period = hours >= 12 ? 'PM' : 'AM';
-              const displayHours = hours % 12 || 12;
-              return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
-            }
-            const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})/);
-            if (timeMatch) {
-              const hours = parseInt(timeMatch[1], 10);
-              const minutes = parseInt(timeMatch[2], 10);
-              const period = hours >= 12 ? 'PM' : 'AM';
-              const displayHours = hours % 12 || 12;
-              return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
-            }
-            return formatTime(timeStr);
+            return formatPredictedTimeDisplay(timeStr) || formatTime(timeStr);
           };
           
           const predictedDeparture = usePredictedDeparture && predictedDepartureData?.predicted
@@ -1131,13 +1135,8 @@ const ScheduleTable = memo(function ScheduleTable({
     }
   }, [nextTrainId, trains.length]);
 
-  const formatPredictedTime = (isoString: string): string => {
-    const date = new Date(isoString);
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours % 12 || 12;
-    return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+  const formatPredictedTime = (timeStr: string): string | null => {
+    return formatPredictedTimeDisplay(timeStr);
   };
 
   const hasDeparted = (departureTime: string): boolean => {
