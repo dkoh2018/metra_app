@@ -373,9 +373,13 @@ export default function Schedule() {
       if (isFetchingCrowdingRef.current && !forceRefresh) {
         return;
       }
-      
+
       isFetchingCrowdingRef.current = true;
-      
+
+      console.debug(
+        `Crowding: fetching data${forceRefresh ? ' (forced refresh)' : ''} at ${new Date().toLocaleTimeString()}`
+      );
+
       const forceParam = forceRefresh ? '&force=true' : '';
       const palatineToChicago = fetch(`/api/crowding?origin=PALATINE&destination=OTC${forceParam}`)
         .then(res => {
@@ -404,7 +408,7 @@ export default function Schedule() {
       Promise.all([palatineToChicago, chicagoToPalatine])
         .then(([palatineData, chicagoData]) => {
           const crowdingMap = new Map<string, CrowdingLevel>();
-          
+
           palatineData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
@@ -413,7 +417,7 @@ export default function Schedule() {
               crowdingMap.set(item.trip_id, item.crowding);
             }
           });
-          
+
           chicagoData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
@@ -424,8 +428,14 @@ export default function Schedule() {
               }
             }
           });
-          
+
           setCrowdingData(crowdingMap);
+
+          console.debug(
+            `Crowding: updated ${crowdingMap.size} train entries (Palatine->Chicago: ${
+              palatineData.crowding?.length || 0
+            }, Chicago->Palatine: ${chicagoData.crowding?.length || 0})`
+          );
         })
         .catch(error => {
           console.debug('Could not fetch crowding data:', error.message);

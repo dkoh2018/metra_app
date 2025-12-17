@@ -2,7 +2,6 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import fs from "fs";
-import os from "os";
 import { Browser, ChromeReleaseChannel, computeExecutablePath, install, resolveBuildId } from "@puppeteer/browsers";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -20,7 +19,8 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_PUPPETEER_CACHE = process.env.PUPPETEER_CACHE_DIR || path.join(os.homedir(), ".cache", "puppeteer");
+const DEFAULT_PUPPETEER_CACHE =
+  process.env.PUPPETEER_CACHE_DIR || path.join(process.cwd(), ".cache", "puppeteer");
 
 let chromeExecutablePath: string | null = null;
 let chromeInstallPromise: Promise<string> | null = null;
@@ -35,19 +35,24 @@ async function ensureChromeExecutable(): Promise<string> {
   }
 
   chromeInstallPromise = (async () => {
+    const cacheDir = path.resolve(DEFAULT_PUPPETEER_CACHE);
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+    }
+
     const buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
     const executablePath = computeExecutablePath({
       browser: Browser.CHROME,
       buildId,
-      cacheDir: DEFAULT_PUPPETEER_CACHE
+      cacheDir
     });
 
     if (!fs.existsSync(executablePath)) {
-      console.log(`Downloading Chrome (${buildId}) to ${DEFAULT_PUPPETEER_CACHE}...`);
+      console.log(`Downloading Chrome (${buildId}) to ${cacheDir}...`);
       await install({
         browser: Browser.CHROME,
         buildId,
-        cacheDir: DEFAULT_PUPPETEER_CACHE,
+        cacheDir,
         unpack: true
       });
     }
