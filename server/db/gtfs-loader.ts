@@ -7,7 +7,11 @@ import { initDatabase } from './schema.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const GTFS_DIR = path.resolve(__dirname, '../gtfs/data');
+// In production, dist/index.js runs from /app/dist, but GTFS is at /app/server/gtfs/data
+// In development, this file is at server/db/gtfs-loader.ts and GTFS is at server/gtfs/data
+const GTFS_DIR = process.env.NODE_ENV === 'production'
+  ? path.resolve(process.cwd(), 'server/gtfs/data')
+  : path.resolve(__dirname, '../gtfs/data');
 
 interface StopTime {
   trip_id: string;

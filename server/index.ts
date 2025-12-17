@@ -254,7 +254,10 @@ async function startServer() {
     app.get("/api/shapes/upnw", async (_req, res) => {
       try {
         const fs = (await import("fs")).default;
-        const shapesPath = path.resolve(__dirname, "gtfs/data/shapes.txt");
+        // In production, use cwd-relative path; in dev, use __dirname-relative
+        const shapesPath = process.env.NODE_ENV === 'production'
+          ? path.resolve(process.cwd(), "server/gtfs/data/shapes.txt")
+          : path.resolve(__dirname, "gtfs/data/shapes.txt");
         const shapesData = fs.readFileSync(shapesPath, "utf-8");
         const lines = shapesData.split("\n");
         
