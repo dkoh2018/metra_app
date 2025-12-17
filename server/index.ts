@@ -1,6 +1,9 @@
 import express from "express";
 import { createServer } from "http";
 import path from "path";
+import fs from "fs";
+import os from "os";
+import { Browser, ChromeReleaseChannel, computeExecutablePath, install, resolveBuildId } from "@puppeteer/browsers";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
@@ -17,6 +20,48 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DEFAULT_PUPPETEER_CACHE = process.env.PUPPETEER_CACHE_DIR || path.join(os.homedir(), ".cache", "puppeteer");
+
+let chromeExecutablePath: string | null = null;
+let chromeInstallPromise: Promise<string> | null = null;
+
+async function ensureChromeExecutable(): Promise<string> {
+  if (chromeExecutablePath && fs.existsSync(chromeExecutablePath)) {
+    return chromeExecutablePath;
+  }
+
+  if (chromeInstallPromise) {
+    return chromeInstallPromise;
+  }
+
+  chromeInstallPromise = (async () => {
+    const buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
+    const executablePath = computeExecutablePath({
+      browser: Browser.CHROME,
+      buildId,
+      cacheDir: DEFAULT_PUPPETEER_CACHE
+    });
+
+    if (!fs.existsSync(executablePath)) {
+      console.log(`Downloading Chrome (${buildId}) to ${DEFAULT_PUPPETEER_CACHE}...`);
+      await install({
+        browser: Browser.CHROME,
+        buildId,
+        cacheDir: DEFAULT_PUPPETEER_CACHE,
+        unpack: true
+      });
+    }
+
+    chromeExecutablePath = executablePath;
+    return executablePath;
+  })();
+
+  try {
+    return await chromeInstallPromise;
+  } finally {
+    chromeInstallPromise = null;
+  }
+}
 
 async function startServer() {
   try {
@@ -482,6 +527,7 @@ async function startServer() {
           let scrapeBrowser: any = null;
           try {
             const puppeteer = (await import("puppeteer")).default;
+            const executablePath = await ensureChromeExecutable();
             
             let firstTrainTimestamp: number;
             
@@ -544,6 +590,7 @@ async function startServer() {
             scrapeBrowser = await puppeteer.launch({
               headless: true,
               args: ['--no-sandbox', '--disable-setuid-sandbox'],
+              executablePath,
               timeout: 30000
             });
             
