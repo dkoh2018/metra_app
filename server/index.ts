@@ -541,6 +541,7 @@ async function startServer() {
 
     // Fetch crowding data from Metra's website
     app.get("/api/crowding", async (req, res) => {
+      console.log(`[API] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
       let browser: any = null;
       let db: any = null;
       const cacheKey = `${req.query.origin || 'PALATINE'}_${req.query.destination || 'OTC'}`;
@@ -550,7 +551,16 @@ async function startServer() {
         const forceRefresh = force === 'true' || force === '1';
         const { getDatabase } = await import("./db/schema.js");
         db = getDatabase();
-        
+
+        // Debug: Check if DB has the new columns
+        try {
+           // We don't select * to avoid performance hit, just check one new column
+           const check = db.prepare("SELECT predicted_departure FROM crowding_cache LIMIT 1").get();
+           console.log("[DB] Schema check passed: 'predicted_departure' column exists.");
+        } catch (e: any) {
+           console.error("[DB] 🚨 SCHEMA ERROR: crowding_cache table is missing new columns! Migration failed or didn't run.", e.message);
+        }
+
         const formatCachedData = (cachedData: Array<{
           trip_id: string;
           crowding: string | null;
