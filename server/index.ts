@@ -571,6 +571,37 @@ async function startServer() {
     // Fetch crowding data from Metra's website
     app.get("/api/crowding", async (req, res) => {
       console.log(`[API] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
+      
+      // Set a timeout for the response (60 seconds should be enough for scraping)
+      const timeout = setTimeout(() => {
+        if (!res.headersSent) {
+          console.error(`[API TIMEOUT] Request timed out for ${req.query.origin}->${req.query.destination}`);
+          try {
+            res.status(504).json({ 
+              error: 'Request timeout', 
+              crowding: [] 
+            });
+          } catch (timeoutError: any) {
+            console.error(`[API TIMEOUT ERROR] Failed to send timeout response: ${timeoutError.message}`);
+          }
+        }
+      }, 60000);
+      
+      // Clear timeout when response is sent
+      const clearTimeoutAndSend = (data: any) => {
+        clearTimeout(timeout);
+        if (!res.headersSent) {
+          try {
+            return res.json(data);
+          } catch (sendError: any) {
+            console.error(`[API SEND ERROR] Failed to send response: ${sendError.message}`);
+            return;
+          }
+        } else {
+          console.warn(`[API WARNING] Response already sent for ${req.query.origin}->${req.query.destination}`);
+        }
+      };
+      
       let browser: any = null;
       let db: any = null;
       const { origin = 'PALATINE', destination = 'OTC', force, line = 'UP-NW' } = req.query;
@@ -903,7 +934,23 @@ async function startServer() {
                 console.log("SCRAPER DEBUG LOGS:\n" + extractedData.debug.join('\n'));
             }
             
+            // Add defensive checks and logging
+            if (!extractedData) {
+              throw new Error('No data returned from page.evaluate()');
+            }
+            
+            if (!extractedData.crowding) {
+              console.error(`[ERROR] extractedData.crowding is missing. extractedData keys: ${Object.keys(extractedData).join(', ')}`);
+              throw new Error('Crowding data missing from extraction result');
+            }
+            
+            if (!Array.isArray(extractedData.crowding)) {
+              console.error(`[ERROR] extractedData.crowding is not an array. Type: ${typeof extractedData.crowding}, Value: ${JSON.stringify(extractedData.crowding).substring(0, 200)}`);
+              throw new Error('Crowding data is not an array');
+            }
+            
             if (extractedData.crowding.length === 0) {
+              console.warn(`[WARNING] No crowding data extracted from Metra website for ${origin}->${destination}`);
               throw new Error('No crowding data extracted from Metra website');
             }
             
@@ -933,48 +980,81 @@ async function startServer() {
                 `Arr: ${sampleTrain.scheduled_arrival}${sampleTrain.estimated_arrival ? ` -> ${sampleTrain.estimated_arrival}` : ''}`);
             }
             
+            console.log(`[CROWDING] About to save to database for ${origin}->${destination}...`);
             const { getDatabase: getDbForCache } = await import("./db/schema.js");
-            const dbForCache = getDbForCache();
-            
+            let dbForCache;
             try {
-              const insertCache = dbForCache.prepare(`
-                INSERT OR REPLACE INTO crowding_cache 
-                (origin, destination, trip_id, crowding, 
-                 scheduled_departure, predicted_departure, 
-                 scheduled_arrival, predicted_arrival, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-              `);
+              dbForCache = getDbForCache();
+              console.log(`[CROWDING] Database connection obtained for ${origin}->${destination}`);
               
-              const transaction = dbForCache.transaction(() => {
-                dbForCache.prepare(`
-                  DELETE FROM crowding_cache 
-                  WHERE origin = ? AND destination = ? AND updated_at < datetime('now', '-24 hours')
-                `).run(origin, destination);
+              // Test database write capability
+              try {
+                dbForCache.prepare('SELECT 1').get();
+                console.log(`[CROWDING] Database connection verified for ${origin}->${destination}`);
+              } catch (testError: any) {
+                console.error(`[ERROR] Database connection test failed for ${origin}->${destination}: ${testError.message}`);
+                throw new Error(`Database connection invalid: ${testError.message}`);
+              }
+            } catch (dbInitError: any) {
+              console.error(`[ERROR] Failed to get database connection for ${origin}->${destination}: ${dbInitError.message}`);
+              console.error(`[ERROR] Stack: ${dbInitError.stack}`);
+              // Continue without caching - still return the data
+              dbForCache = null;
+            }
+            
+            if (dbForCache) {
+              try {
+                console.log(`[CROWDING] Preparing database insert for ${origin}->${destination} (${extractedData.crowding.length} items)...`);
+                const insertCache = dbForCache.prepare(`
+                  INSERT OR REPLACE INTO crowding_cache 
+                  (origin, destination, trip_id, crowding, 
+                   scheduled_departure, predicted_departure, 
+                   scheduled_arrival, predicted_arrival, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                `);
                 
-                extractedData.crowding.forEach((item: {
-                  trip_id: string;
-                  crowding: CrowdingLevel;
-                  scheduled_departure: string | null;
-                  estimated_departure: string | null;
-                  scheduled_arrival: string | null;
-                  estimated_arrival: string | null;
-                }) => {
-                  insertCache.run(
-                    origin,
-                    destination,
-                    item.trip_id,
-                    item.crowding,
-                    item.scheduled_departure,
-                    item.estimated_departure,
-                    item.scheduled_arrival,
-                    item.estimated_arrival
-                  );
+                console.log(`[CROWDING] Starting transaction for ${origin}->${destination}...`);
+                const transaction = dbForCache.transaction(() => {
+                  console.log(`[CROWDING] Deleting old cache entries for ${origin}->${destination}...`);
+                  dbForCache.prepare(`
+                    DELETE FROM crowding_cache 
+                    WHERE origin = ? AND destination = ? AND updated_at < datetime('now', '-24 hours')
+                  `).run(origin, destination);
+                  
+                  console.log(`[CROWDING] Inserting ${extractedData.crowding.length} cache entries for ${origin}->${destination}...`);
+                  extractedData.crowding.forEach((item: {
+                    trip_id: string;
+                    crowding: CrowdingLevel;
+                    scheduled_departure: string | null;
+                    estimated_departure: string | null;
+                    scheduled_arrival: string | null;
+                    estimated_arrival: string | null;
+                  }, index: number) => {
+                    try {
+                      insertCache.run(
+                        origin,
+                        destination,
+                        item.trip_id,
+                        item.crowding,
+                        item.scheduled_departure,
+                        item.estimated_departure,
+                        item.scheduled_arrival,
+                        item.estimated_arrival
+                      );
+                      if (index < 3) {
+                        console.log(`[CROWDING] Inserted cache entry ${index + 1}/${extractedData.crowding.length}: ${item.trip_id} (${item.crowding})`);
+                      }
+                    } catch (insertError: any) {
+                      console.error(`[ERROR] Failed to insert cache entry for ${item.trip_id}: ${insertError.message}`);
+                      throw insertError;
+                    }
+                  });
                 });
-              });
-              
-              transaction();
-              const savedCount = extractedData.crowding.length;
-              console.log(`[CACHE SAVE] Saved ${savedCount} entries to database for ${origin}->${destination} (using INSERT OR REPLACE - updates existing, no duplicates)`);
+                
+                console.log(`[CROWDING] Executing transaction for ${origin}->${destination}...`);
+                transaction();
+                const savedCount = extractedData.crowding.length;
+                console.log(`[CACHE SAVE] Saved ${savedCount} entries to database for ${origin}->${destination} (using INSERT OR REPLACE - updates existing, no duplicates)`);
               
               // Verify no duplicates exist (should always be 0 due to unique constraint)
               const duplicateCheck = dbForCache.prepare(`
@@ -1000,13 +1080,19 @@ async function startServer() {
                 WHERE origin = ? AND destination = ?
               `).get(origin, destination) as { total: number; oldest: string; newest: string };
               
-              if (cacheStats) {
-                console.log(`[CACHE STATS] ${origin}->${destination}: ${cacheStats.total} total entries (oldest: ${cacheStats.oldest}, newest: ${cacheStats.newest})`);
+                if (cacheStats) {
+                  console.log(`[CACHE STATS] ${origin}->${destination}: ${cacheStats.total} total entries (oldest: ${cacheStats.oldest}, newest: ${cacheStats.newest})`);
+                }
+              } catch (cacheError: any) {
+                console.error(`[ERROR] Failed to cache data for ${origin}->${destination}: ${cacheError.message}`);
+                console.error(`[ERROR] Stack: ${cacheError.stack}`);
+                // Don't throw - we still want to return the data even if caching fails
               }
-            } catch (cacheError: any) {
-              console.warn(`Failed to cache data: ${cacheError.message}`);
+            } else {
+              console.warn(`[WARNING] Database not available, skipping cache save for ${origin}->${destination} (data will still be returned)`);
             }
             
+            console.log(`[CROWDING] About to close browser and return data for ${origin}->${destination}...`);
             if (scrapeBrowser && scrapeBrowser.isConnected()) {
               try {
                 await scrapeBrowser.close();
@@ -1019,9 +1105,23 @@ async function startServer() {
               }
             }
             
-            return {
-              crowding: extractedData.crowding
+            console.log(`[CROWDING] Returning ${extractedData.crowding.length} crowding entries for ${origin}->${destination}`);
+            
+            // Ensure all data is properly serializable
+            const result = {
+              crowding: extractedData.crowding.map((item: any) => ({
+                trip_id: String(item.trip_id || ''),
+                crowding: String(item.crowding || 'low'),
+                scheduled_departure: item.scheduled_departure ? String(item.scheduled_departure) : null,
+                predicted_departure: item.estimated_departure ? String(item.estimated_departure) : null,
+                scheduled_arrival: item.scheduled_arrival ? String(item.scheduled_arrival) : null,
+                predicted_arrival: item.estimated_arrival ? String(item.estimated_arrival) : null
+              }))
             };
+            
+            console.log(`[CROWDING] Result prepared with ${result.crowding.length} entries, returning for ${origin}->${destination}`);
+            console.log(`[CROWDING] Sample entry: ${JSON.stringify(result.crowding[0] || {}).substring(0, 200)}`);
+            return result;
           } catch (scrapeError: any) {
             if (scrapeBrowser && scrapeBrowser.isConnected()) {
               try {
@@ -1049,10 +1149,15 @@ async function startServer() {
         scrapingLocks.set(cacheKey, scrapePromise);
         
         try {
+          console.log(`[API] Waiting for scraping promise to complete for ${origin}->${destination}...`);
           const result = await scrapePromise;
+          console.log(`[API] Scraping completed for ${origin}->${destination}, result has ${result?.crowding?.length || 0} entries`);
           scrapingLocks.delete(cacheKey);
-          return res.json(result);
+          console.log(`[API] Sending JSON response for ${origin}->${destination}...`);
+          return clearTimeoutAndSend(result);
         } catch (scrapeError: any) {
+          console.error(`[API ERROR] Scraping failed for ${origin}->${destination}: ${scrapeError.message}`);
+          console.error(`[API ERROR] Stack: ${scrapeError.stack}`);
           scrapingLocks.delete(cacheKey);
           
           const isDetachmentError = scrapeError.message.includes('detached') || 
@@ -1071,15 +1176,19 @@ async function startServer() {
             const ageHours = Math.round((Date.now() - new Date(oldestEntry.updated_at).getTime()) / (1000 * 60 * 60));
             console.log(`[CROWDING] Scraping failed for ${origin}->${destination}, falling back to stale cache (${staleCache.length} entries, ~${ageHours}h old)`);
             const result = formatCachedData(staleCache);
-            return res.json(result);
+            return clearTimeoutAndSend(result);
           }
           
           console.warn(`[CROWDING] No data available for ${origin}->${destination} (scraping failed, no stale cache)`);
-          return res.json({ crowding: [] });
+          return clearTimeoutAndSend({ crowding: [] });
         }
       } catch (error: any) {
-        console.error("Error fetching crowding data:", error.message);
-        return res.json({ crowding: [] });
+        console.error(`[API ERROR] Error fetching crowding data for ${origin}->${destination}:`, error.message);
+        console.error(`[API ERROR] Stack: ${error.stack}`);
+        return clearTimeoutAndSend({ crowding: [] });
+      } finally {
+        // Ensure timeout is cleared
+        clearTimeout(timeout);
       }
     });
 
