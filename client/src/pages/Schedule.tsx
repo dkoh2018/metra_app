@@ -7,6 +7,8 @@ import { getChicagoTime, getServiceDayType, getCurrentMinutesInChicago, formatCh
 
 // Lazy load the map component since it's heavy
 const TrainMap = lazy(() => import('@/components/TrainMap'));
+import { StationSelector } from '@/components/StationSelector';
+import { STATIONS } from '@/lib/stations';
 
 type DayType = 'weekday' | 'saturday' | 'sunday';
 type Direction = 'inbound' | 'outbound';
@@ -199,6 +201,11 @@ export default function Schedule() {
     predicted_arrival: string | null;
   }>>(new Map());
   const [showDelayDebug, setShowDelayDebug] = useState(false);
+  
+  // Phase 2: Multi-Station State
+  const [selectedGtfsId, setSelectedGtfsId] = useState<string>(STATIONS.palatine.gtfsId!);
+  const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || STATIONS.palatine;
+
   const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
   const lastFetchMinuteRef = useRef<number | null>(null);
   const isFetchingCrowdingRef = useRef<boolean>(false);
@@ -230,7 +237,7 @@ export default function Schedule() {
     setScheduleLoading(true);
     setScheduleError(null);
     
-    fetch('/api/schedule')
+    fetch(`/api/schedule?station=${selectedGtfsId}`)
       .then(res => {
         if (!res.ok) {
           if (res.status === 503) {
@@ -268,13 +275,9 @@ export default function Schedule() {
         setScheduleLoading(false);
       })
       .catch(error => {
-        console.error('Error fetching schedule:', error);
-        const fallback = require('@/lib/scheduleData').scheduleData;
-        setScheduleData(fallback);
-        setScheduleError('Using offline schedule data');
         setScheduleLoading(false);
       });
-  }, []);
+  }, [selectedGtfsId]); // Refresh when station changes
 
   // Fetch alerts from Metra API
   useEffect(() => {
@@ -320,8 +323,8 @@ export default function Schedule() {
           const predictedMap = new Map<string, { scheduled?: string; predicted?: string; stop_id: string }>();
           
           data.delays.forEach(delay => {
-            const destinationStopId = direction === 'inbound' ? 'OTC' : 'PALATINE';
-            const originStopId = direction === 'inbound' ? 'PALATINE' : 'OTC';
+            const destinationStopId = direction === 'inbound' ? 'OTC' : selectedGtfsId;
+            const originStopId = direction === 'inbound' ? selectedGtfsId : 'OTC';
             
             if (delay.stop_id === destinationStopId) {
               const existingDelay = delayMap.get(delay.trip_id) || 0;
@@ -371,7 +374,7 @@ export default function Schedule() {
       clearTimeout(timeout);
       if (interval) clearInterval(interval);
     };
-  }, [direction]);
+  }, [direction, selectedGtfsId]);
 
   // Fetch crowding data
   useEffect(() => {
@@ -387,7 +390,7 @@ export default function Schedule() {
       );
 
       const forceParam = forceRefresh ? '&force=true' : '';
-      const palatineToChicago = fetch(`/api/crowding?origin=PALATINE&destination=OTC${forceParam}`)
+      const palatineToChicago = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=OTC${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -399,7 +402,7 @@ export default function Schedule() {
           return { crowding: [] };
         });
       
-      const chicagoToPalatine = fetch(`/api/crowding?origin=OTC&destination=PALATINE${forceParam}`)
+      const chicagoToPalatine = fetch(`/api/crowding?origin=OTC&destination=${selectedGtfsId}${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -875,11 +878,12 @@ export default function Schedule() {
               <span>{direction === 'inbound' ? 'Chicago' : 'Suburbs'}</span>
             </button>
 
-            {/* Center: Branding - Palatine */}
+            {/* Center: Branding - Station Selector */}
             <div className="flex-1 text-center py-1 flex items-center justify-center">
-              <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">
-                Palatine
-              </span>
+              <StationSelector 
+                selectedGtfsId={selectedGtfsId} 
+                onStationChange={setSelectedGtfsId} 
+              />
             </div>
 
             {/* Right: Live Sync Status - Matches card style */}
@@ -1030,7 +1034,7 @@ export default function Schedule() {
                     {direction === 'inbound' ? 'Inbound' : 'Outbound'}
                   </span>
                   <ArrowRight className="w-3 h-3" />
-                  <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">{direction === 'inbound' ? 'Chicago' : 'Palatine'}</span>
+                  <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">{direction === 'inbound' ? 'Chicago' : selectedStation.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {crowdingLevel && (

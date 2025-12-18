@@ -54,7 +54,13 @@ function getServiceIdsForDayType(dayType: 'weekday' | 'saturday' | 'sunday'): st
 /**
  * Get schedule for a specific day type
  */
-export function getScheduleForDayType(dayType: 'weekday' | 'saturday' | 'sunday'): DayType {
+/**
+ * Get schedule for a specific day type
+ */
+export function getScheduleForDayType(
+  dayType: 'weekday' | 'saturday' | 'sunday',
+  stationId: string = 'PALATINE'
+): DayType {
   const db = getDatabase();
   const serviceIdList = getServiceIdsForDayType(dayType);
   
@@ -69,7 +75,7 @@ export function getScheduleForDayType(dayType: 'weekday' | 'saturday' | 'sunday'
   // Deduplicate by departure_time and arrival_time to avoid multiple service variants
   // s1 = Origin (Start of trip, min sequence)
   // s2 = Destination (End of trip, max sequence)
-  // Get inbound trains (Palatine -> Chicago)
+  // Get inbound trains (Selected Station -> Chicago)
   const inboundTrains = db.prepare(`
     SELECT 
       MIN(s1.trip_id) as trip_id,
@@ -80,13 +86,13 @@ export function getScheduleForDayType(dayType: 'weekday' | 'saturday' | 'sunday'
     JOIN schedules s2 ON s1.trip_id = s2.trip_id
     WHERE s1.direction = 'inbound'
       AND s1.service_id IN (${placeholders})
-      AND s1.stop_id = 'PALATINE'
+      AND s1.stop_id = ?
       AND s2.stop_id = 'OTC'
     GROUP BY s1.departure_time, s2.arrival_time
     ORDER BY s1.departure_time
-  `).all(...serviceIdList) as TrainSchedule[];
+  `).all(...serviceIdList, stationId) as TrainSchedule[];
   
-  // Get outbound trains (Chicago -> Palatine)
+  // Get outbound trains (Chicago -> Selected Station)
   const outboundTrains = db.prepare(`
     SELECT 
       MIN(s1.trip_id) as trip_id,
@@ -98,10 +104,10 @@ export function getScheduleForDayType(dayType: 'weekday' | 'saturday' | 'sunday'
     WHERE s1.direction = 'outbound'
       AND s1.service_id IN (${placeholders})
       AND s1.stop_id = 'OTC'
-      AND s2.stop_id = 'PALATINE'
+      AND s2.stop_id = ?
     GROUP BY s1.departure_time, s2.arrival_time
     ORDER BY s1.departure_time
-  `).all(...serviceIdList) as TrainSchedule[];
+  `).all(...serviceIdList, stationId) as TrainSchedule[];
   
   // Don't close - connection is reused for better performance
   
@@ -115,15 +121,15 @@ export function getScheduleForDayType(dayType: 'weekday' | 'saturday' | 'sunday'
 /**
  * Get all schedules (weekday, saturday, sunday)
  */
-export function getAllSchedules(): {
+export function getAllSchedules(stationId: string = 'PALATINE'): {
   weekday: DayType;
   saturday: DayType;
   sunday: DayType;
 } {
   return {
-    weekday: getScheduleForDayType('weekday'),
-    saturday: getScheduleForDayType('saturday'),
-    sunday: getScheduleForDayType('sunday')
+    weekday: getScheduleForDayType('weekday', stationId),
+    saturday: getScheduleForDayType('saturday', stationId),
+    sunday: getScheduleForDayType('sunday', stationId)
   };
 }
 
@@ -133,9 +139,10 @@ export function getAllSchedules(): {
 export function getNextTrain(
   direction: 'inbound' | 'outbound',
   currentTimeMinutes: number,
-  dayType: 'weekday' | 'saturday' | 'sunday'
+  dayType: 'weekday' | 'saturday' | 'sunday',
+  stationId: string = 'PALATINE'
 ): TrainSchedule | null {
-  const schedule = getScheduleForDayType(dayType);
+  const schedule = getScheduleForDayType(dayType, stationId);
   const trains = direction === 'inbound' ? schedule.inbound : schedule.outbound;
   
   const timeToMinutes = (timeStr: string): number => {

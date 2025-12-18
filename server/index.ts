@@ -423,12 +423,14 @@ async function startServer() {
     });
 
     // New schedule API endpoints
-    app.get("/api/schedule", (_req, res) => {
+    app.get("/api/schedule", (req, res) => {
       try {
         if (!getAllSchedules) {
           return res.status(503).json({ error: "Database not available. Using static schedule data." });
         }
-        const schedules = getAllSchedules();
+        const { station } = req.query;
+        const stationId = typeof station === 'string' ? station : 'PALATINE';
+        const schedules = getAllSchedules(stationId);
         res.json(schedules);
       } catch (error: any) {
         console.error("Error fetching schedule:", error.message);
@@ -439,13 +441,16 @@ async function startServer() {
     app.get("/api/schedule/:dayType", (req, res) => {
       try {
         const { dayType } = req.params;
+        const { station } = req.query;
+        
         if (!['weekday', 'saturday', 'sunday'].includes(dayType)) {
           return res.status(400).json({ error: "Invalid day type" });
         }
         if (!getAllSchedules) {
           return res.status(503).json({ error: "Database not available" });
         }
-        const schedules = getAllSchedules();
+        const stationId = typeof station === 'string' ? station : 'PALATINE';
+        const schedules = getAllSchedules(stationId);
         res.json(schedules[dayType as keyof typeof schedules]);
       } catch (error: any) {
         console.error("Error fetching schedule:", error.message);
@@ -455,7 +460,7 @@ async function startServer() {
 
     app.get("/api/next-train", (req, res) => {
       try {
-        const { direction, dayType, currentTime } = req.query;
+        const { direction, dayType, currentTime, station } = req.query;
         if (!direction || !dayType || !currentTime) {
           return res.status(400).json({ error: "Missing required parameters" });
         }
@@ -470,10 +475,12 @@ async function startServer() {
             })()
           : parseInt(currentTime as string);
         
+        const stationId = typeof station === 'string' ? station : 'PALATINE';
         const next = getNextTrain(
           direction as 'inbound' | 'outbound',
           timeMinutes,
-          dayType as 'weekday' | 'saturday' | 'sunday'
+          dayType as 'weekday' | 'saturday' | 'sunday',
+          stationId
         );
         
         res.json({ train: next });
@@ -719,6 +726,9 @@ async function startServer() {
                 estimated_arrival: string | null;
               }>();
               
+              const debug: string[] = [];
+              debug.push(`Scraping Origin: ${scrapeOrigin}, Dest: ${scrapeDest}`);
+              
               // First: Extract crowding from .trip-row elements
               const tripRows = Array.from(document.querySelectorAll('.trip-row'));
               tripRows.forEach((tripCell: Element) => {
@@ -754,10 +764,16 @@ async function startServer() {
               // Second: Extract estimated times from td.stop.has-exception elements
               // These have IDs like "UP-NW_UNW672_V3_APALATINE" (trip_id + "_" + stop)
               const estimatedStops = Array.from(document.querySelectorAll('td.stop.has-exception'));
+              debug.push(`Found ${estimatedStops.length} estimated stop cells`);
               
-              estimatedStops.forEach((cell: Element) => {
+              estimatedStops.forEach((cell: Element, index: number) => {
+                if (index < 2) debug.push(`Cell ${index} HTML sample: ${cell.outerHTML.substring(0, 150)}...`);
+                
                 // Check if this cell has estimated time indicator
-                if (!cell.querySelector('.stop--exception-estimated')) return;
+                if (!cell.querySelector('.stop--exception-estimated')) {
+                    if (index < 2) debug.push(`Cell ${index} skipped: missing .stop--exception-estimated`);
+                    return;
+                }
                 
                 const cellId = cell.getAttribute('id');
                 if (!cellId) return;
@@ -793,15 +809,28 @@ async function startServer() {
                   if (isOriginStop) {
                     existing.scheduled_departure = scheduledTime;
                     existing.estimated_departure = estimatedTime;
+                    debug.push(`Updated departure for ${tripId}: ${scheduledTime} -> ${estimatedTime}`);
                   } else if (isDestStop) {
                     existing.scheduled_arrival = scheduledTime;
                     existing.estimated_arrival = estimatedTime;
+                    debug.push(`Updated arrival for ${tripId}: ${scheduledTime} -> ${estimatedTime}`);
+                  } else {
+                     if (index < 5) debug.push(`Trip ${tripId} match but not origin/dest. CellId: ${cellId}`);
                   }
+                } else {
+                     if (index < 5) debug.push(`Trip ${tripId} not found in resultsMap`);
                 }
               });
               
-              return { crowding: Array.from(resultsMap.values()) };
+              return {
+                crowding: Array.from(resultsMap.values()),
+                debug
+              };
             }, origin, destination);
+
+            if (extractedData.debug && extractedData.debug.length > 0) {
+                console.log("SCRAPER DEBUG LOGS:\n" + extractedData.debug.join('\n'));
+            }
             
             if (extractedData.crowding.length === 0) {
               throw new Error('No crowding data extracted from Metra website');
