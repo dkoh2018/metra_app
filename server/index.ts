@@ -674,7 +674,7 @@ async function startServer() {
               throw new Error('Page was closed before data extraction');
             }
             
-            const extractedData = await page.evaluate(() => {
+            const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string) => {
               type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
               
               // Map to store results by trip_id
@@ -737,9 +737,10 @@ async function startServer() {
                 if (!tripIdMatch) return;
                 const tripId = tripIdMatch[1];
                 
-                // Determine if this is departure (PALATINE) or arrival (OTC) based on cell ID
-                const isOriginStop = cellId.includes('PALATINE');
-                const isDestStop = cellId.includes('OTC');
+                // Determine if this is departure (origin) or arrival (dest) based on cell ID
+                // Use the actual origin/dest passed from the scraper
+                const isOriginStop = cellId.includes(scrapeOrigin);
+                const isDestStop = cellId.includes(scrapeDest);
                 
                 // Get the estimated time from the cell
                 const stopText = cell.querySelector('.stop--text');
@@ -768,7 +769,7 @@ async function startServer() {
               });
               
               return { crowding: Array.from(resultsMap.values()) };
-            });
+            }, origin, destination);
             
             if (extractedData.crowding.length === 0) {
               throw new Error('No crowding data extracted from Metra website');

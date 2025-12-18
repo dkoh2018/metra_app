@@ -206,7 +206,6 @@ const createTrainIcon = (trainNumber: string, bearing?: number, direction?: stri
   });
 };
 
-// Create station marker icon
 const createStationIcon = (isTerminal: boolean = false) => {
   const size = 14; // All stations same size as terminal
   const iconHtml = `
@@ -227,6 +226,75 @@ const createStationIcon = (isTerminal: boolean = false) => {
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, -10],
+  });
+};
+
+// Create a glowing green user location icon (Apple Maps style)
+const createUserLocationIcon = () => {
+  const iconHtml = `
+    <div style="
+      position: relative;
+      width: 36px;
+      height: 36px;
+    ">
+      <!-- Outer pulsing glow ring - DARK GREEN -->
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 28px;
+        height: 28px;
+        background: rgba(0, 180, 80, 0.4);
+        border: 2px solid rgba(0, 180, 80, 0.7);
+        border-radius: 50%;
+        animation: userPulse 1.5s ease-out infinite;
+        filter: blur(1px);
+      "></div>
+      <!-- Static glow ring - DARK GREEN -->
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 18px;
+        height: 18px;
+        background: rgba(0, 180, 80, 0.5);
+        border-radius: 50%;
+        box-shadow: 0 0 12px rgba(0, 180, 80, 0.8), 0 0 20px rgba(0, 180, 80, 0.5);
+      "></div>
+      <!-- Core bright dot - DARK GREEN -->
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 12px;
+        height: 12px;
+        background: #00b450;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 
+          0 0 0 2px rgba(0, 180, 80, 0.5),
+          0 0 8px rgba(0, 180, 80, 1),
+          0 0 16px rgba(0, 180, 80, 0.8),
+          0 0 24px rgba(0, 180, 80, 0.5);
+      "></div>
+    </div>
+    <style>
+      @keyframes userPulse {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+      }
+    </style>
+  `;
+
+  return L.divIcon({
+    html: iconHtml,
+    className: 'user-location-marker',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -14],
   });
 };
 
@@ -298,6 +366,10 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<TripSchedule[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
+  
+  // User GPS location state (no caching - only in-memory while on app)
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [userLocationIcon, setUserLocationIcon] = useState<L.DivIcon | null>(null);
 
   // Fetch schedule for a selected trip
   const fetchTripSchedule = async (tripId: string) => {
@@ -374,6 +446,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   useEffect(() => {
     setStationIcon(createStationIcon(false));
     setTerminalIcon(createStationIcon(true));
+    setUserLocationIcon(createUserLocationIcon());
     
     // Initial fetch
     fetchPositions();
@@ -396,6 +469,44 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
       if (interval) clearInterval(interval);
     };
   }, [fetchPositions]);
+
+  // Request user GPS location (graceful - no crash if denied, no caching)
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      console.debug('Geolocation not supported by browser');
+      return;
+    }
+
+    let watchId: number | null = null;
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      setUserLocation({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      });
+    };
+
+    const handleError = (error: GeolocationPositionError) => {
+      // Graceful handling - just don't show location, no crash
+      console.debug('Geolocation error (user may have declined):', error.message);
+      setUserLocation(null);
+    };
+
+    // Watch position for live updates (no caching - enableHighAccuracy for GPS)
+    watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0 // Never use cached position
+    });
+
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      // Clear location on unmount (no persistence)
+      setUserLocation(null);
+    };
+  }, []);
 
   // Count trains by direction
   const inboundCount = trains.filter(t => t.direction === 'inbound').length;
@@ -588,6 +699,20 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
               </Marker>
             );
           })}
+          
+          {/* User Location Marker - Actual GPS position (only if location granted) */}
+          {userLocation && userLocationIcon && (
+            <Marker
+              position={[userLocation.lat, userLocation.lng]}
+              icon={userLocationIcon}
+            >
+              <Popup className="user-popup">
+                <div className="text-center">
+                  <div className="font-bold text-blue-600">📍 Your Location</div>
+                </div>
+              </Popup>
+            </Marker>
+          )}
         </MapContainer>
         
         {/* Loading/Error status only */}

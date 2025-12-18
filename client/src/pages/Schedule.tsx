@@ -496,18 +496,53 @@ export default function Schedule() {
     
     fetchCrowding();
     
-    const now = new Date();
-    const msToNextSync = 30000 - (now.getTime() % 30000);
+    // Visibility-based polling - stop when tab is hidden, resume when visible
+    let interval: NodeJS.Timeout | null = null;
+    let timeout: NodeJS.Timeout | null = null;
     
-    let interval: NodeJS.Timeout;
-    const timeout = setTimeout(() => {
-      fetchCrowding(false);
-      interval = setInterval(() => fetchCrowding(false), 30000);
-    }, msToNextSync);
+    const startPolling = () => {
+      if (interval) return; // Already polling
+      
+      const now = new Date();
+      const msToNextSync = 60000 - (now.getTime() % 60000); // Poll every 60 sec instead of 30
+      
+      timeout = setTimeout(() => {
+        fetchCrowding(false);
+        interval = setInterval(() => fetchCrowding(false), 60000);
+      }, msToNextSync);
+    };
+    
+    const stopPolling = () => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        console.debug('Tab hidden - polling paused');
+      } else {
+        fetchCrowding(true); // Refresh data immediately when tab becomes visible
+        startPolling();
+        console.debug('Tab visible - polling resumed');
+      }
+    };
+    
+    // Start polling initially (tab is visible)
+    startPolling();
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     
     return () => {
-      clearTimeout(timeout);
-      if (interval) clearInterval(interval);
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       fetchCrowdingRef.current = null;
     };
   }, []);
@@ -929,14 +964,33 @@ export default function Schedule() {
             return minutesUntil >= 0 && minutesUntil < 24 * 60 ? minutesUntil : null;
           };
           
-          const departureTimeForCountdown = usePredictedDeparture && predictedDepartureData?.predicted
-            ? (() => {
-                const predDate = new Date(predictedDepartureData.predicted);
-                const hours = predDate.getHours();
-                const minutes = predDate.getMinutes();
-                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-              })()
-            : nextTrain.departureTime;
+          const departureTimeForCountdown = (() => {
+            // Priority 1: Use scraped estimated departure time
+            if (scrapedEstimate?.predicted_departure) {
+              const match = scrapedEstimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+              if (match) {
+                let hours = parseInt(match[1], 10);
+                const mins = parseInt(match[2], 10);
+                const period = match[3].toUpperCase();
+                
+                if (period === 'PM' && hours !== 12) hours += 12;
+                if (period === 'AM' && hours === 12) hours = 0;
+                
+                return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+              }
+            }
+            
+            // Priority 2: Use real-time API prediction
+            if (usePredictedDeparture && predictedDepartureData?.predicted) {
+              const predDate = new Date(predictedDepartureData.predicted);
+              const hours = predDate.getHours();
+              const minutes = predDate.getMinutes();
+              return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+            }
+            
+            // Default: use scheduled time
+            return nextTrain.departureTime;
+          })();
           const minutesUntil = getMinutesUntilDeparture(departureTimeForCountdown);
           
           const formatPredictedTimeForCard = (timeStr: string) => {
@@ -1015,13 +1069,31 @@ export default function Schedule() {
                         if (scrapedEstimate?.predicted_departure) {
                           const sched = scrapedEstimate.scheduled_departure || formatTime(nextTrain.departureTime);
                           const pred = scrapedEstimate.predicted_departure;
-                          const isDelayed = pred > sched;
-                          const isEarly = pred < sched;
-                          if (isDelayed || isEarly) {
+                          
+                          // Parse times to calculate difference
+                          const parseTime = (t: string) => {
+                            const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            if (!match) return 0;
+                            let h = parseInt(match[1], 10);
+                            const m = parseInt(match[2], 10);
+                            if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                            if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                            return h * 60 + m;
+                          };
+                          
+                          const schedMins = parseTime(sched);
+                          const predMins = parseTime(pred);
+                          const diffMins = predMins - schedMins;
+                          
+                          if (diffMins !== 0) {
+                            const isDelayed = diffMins > 0;
                             return (
                               <>
                                 <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{sched}</span>
-                                <span className={isDelayed ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>{pred}</span>
+                                <span className={isDelayed ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                                  {pred}{' '}
+                                  <span className="text-sm sm:text-lg">({isDelayed ? '+' : ''}{diffMins}min)</span>
+                                </span>
                               </>
                             );
                           }
@@ -1127,7 +1199,7 @@ export default function Schedule() {
                   </div>
                   <span className="text-zinc-400">•</span>
                   {(() => {
-                    // Calculate adjusted duration if there's a delay
+                    // Calculate duration from estimated times if available
                     if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
                       const parseTime = (t: string) => {
                         const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -1139,28 +1211,16 @@ export default function Schedule() {
                         return h * 60 + m;
                       };
                       
-                      const schedDepMins = scrapedEstimate.scheduled_departure 
-                        ? parseTime(scrapedEstimate.scheduled_departure) 
-                        : 0;
-                      const predDepMins = parseTime(scrapedEstimate.predicted_departure);
-                      const predArrMins = parseTime(scrapedEstimate.predicted_arrival);
+                      const depMins = parseTime(scrapedEstimate.predicted_departure);
+                      const arrMins = parseTime(scrapedEstimate.predicted_arrival);
+                      const estimatedDuration = arrMins - depMins;
                       
-                      // Calculate actual trip duration from estimated times
-                      const actualDuration = predArrMins - predDepMins;
-                      const diffMins = predDepMins - schedDepMins; // Departure delay
-                      
-                      if (diffMins !== 0 && actualDuration > 0) {
-                        const isLate = diffMins > 0;
-                        return (
-                          <span className={cn("font-medium", isLate ? "text-rose-600" : "text-emerald-600")}>
-                            {actualDuration} min{' '}
-                            <span className="text-xs">({isLate ? '+' : ''}{diffMins}min)</span>
-                          </span>
-                        );
+                      if (estimatedDuration > 0) {
+                        return <span>{estimatedDuration} min trip</span>;
                       }
                     }
                     
-                    // Default duration
+                    // Default: use scheduled duration
                     return <span>{duration} min trip</span>;
                   })()}
                   <a 
@@ -1510,25 +1570,35 @@ const ScheduleTable = memo(function ScheduleTable({
                 departed && !isNext && "text-zinc-400"
               )}>
                 {(() => {
+                  // Parse time to minutes for comparison
+                  const parseTime = (t: string) => {
+                    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+                    if (!match) return 0;
+                    let h = parseInt(match[1], 10);
+                    const m = parseInt(match[2], 10);
+                    if (match[3]?.toUpperCase() === 'PM' && h !== 12) h += 12;
+                    if (match[3]?.toUpperCase() === 'AM' && h === 12) h = 0;
+                    return h * 60 + m;
+                  };
+                  
                   // Use scraped estimated departure if available
-                  if (scrapedEstimate?.predicted_departure) {
-                    // Check if late (predicted > scheduled) or early (predicted < scheduled)
-                    const sched = scrapedEstimate.scheduled_departure || formatTime(train.departureTime);
+                  if (scrapedEstimate?.predicted_departure && scrapedEstimate?.scheduled_departure) {
                     const pred = scrapedEstimate.predicted_departure;
-                    const isDelayed = pred > sched;
-                    const isEarly = pred < sched;
-                    return (
-                      <span className={isDelayed ? "text-rose-600 font-semibold" : isEarly ? "text-emerald-600 font-semibold" : ""}>
-                        {pred}
-                      </span>
-                    );
+                    const schedMins = parseTime(scrapedEstimate.scheduled_departure);
+                    const predMins = parseTime(pred);
+                    const diffMins = predMins - schedMins;
+                    
+                    if (diffMins > 0) {
+                      return <span className="text-rose-600 font-semibold">{pred}</span>;
+                    } else if (diffMins < 0) {
+                      return <span className="text-emerald-600 font-semibold">{pred}</span>;
+                    }
+                    // Same time - show in default color
+                    return pred;
                   }
                   // Fallback to real-time API prediction
                   if (isNext && predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture) {
-                    return <span className="text-red-600">{predictedDeparture}</span>;
-                  }
-                  if (isNext && predictedDeparture && delayMinutes && delayMinutes > 0) {
-                    return <span className="text-red-600">{predictedDeparture}</span>;
+                    return <span className="text-rose-600">{predictedDeparture}</span>;
                   }
                   return formatTime(train.departureTime);
                 })()}
@@ -1541,38 +1611,71 @@ const ScheduleTable = memo(function ScheduleTable({
                 departed && !isNext && "text-zinc-400"
               )}>
                 {(() => {
+                  // Parse time to minutes for comparison
+                  const parseTime = (t: string) => {
+                    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+                    if (!match) return 0;
+                    let h = parseInt(match[1], 10);
+                    const m = parseInt(match[2], 10);
+                    if (match[3]?.toUpperCase() === 'PM' && h !== 12) h += 12;
+                    if (match[3]?.toUpperCase() === 'AM' && h === 12) h = 0;
+                    return h * 60 + m;
+                  };
+                  
                   // Use scraped estimated arrival if available
-                  if (scrapedEstimate?.predicted_arrival) {
-                    const sched = scrapedEstimate.scheduled_arrival || formatTime(train.arrivalTime);
+                  if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
                     const pred = scrapedEstimate.predicted_arrival;
-                    const isDelayed = pred > sched;
-                    const isEarly = pred < sched;
-                    return (
-                      <span className={isDelayed ? "text-rose-600 font-semibold" : isEarly ? "text-emerald-600 font-semibold" : ""}>
-                        {pred}
-                      </span>
-                    );
+                    const schedMins = parseTime(scrapedEstimate.scheduled_arrival);
+                    const predMins = parseTime(pred);
+                    const diffMins = predMins - schedMins;
+                    
+                    if (diffMins > 0) {
+                      return <span className="text-rose-600 font-semibold">{pred}</span>;
+                    } else if (diffMins < 0) {
+                      return <span className="text-emerald-600 font-semibold">{pred}</span>;
+                    }
+                    // Same time - show in default color
+                    return pred;
                   }
                   // Fallback to real-time API prediction
                   if (isNext && predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival) {
-                    return <span className="text-red-600">{predictedArrival}</span>;
-                  }
-                  if (isNext && predictedArrival && delayMinutes && delayMinutes > 0) {
-                    return <span className="text-red-600">{predictedArrival}</span>;
+                    return <span className="text-rose-600">{predictedArrival}</span>;
                   }
                   return formatTime(train.arrivalTime);
                 })()}
               </div>
               
-              {/* Duration Column */}
+              {/* Duration Column - calculate from estimated times if available */}
               <div className={cn(
                 "w-14 shrink-0 text-xs text-zinc-600",
                 departed && !isNext && "text-zinc-400"
               )}>
-                {duration}m
+                {(() => {
+                  // Calculate from scraped estimated times if both departure and arrival are available
+                  if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
+                    const parseTime = (t: string) => {
+                      const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                      if (!match) return 0;
+                      let h = parseInt(match[1], 10);
+                      const m = parseInt(match[2], 10);
+                      if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                      if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                      return h * 60 + m;
+                    };
+                    
+                    const depMins = parseTime(scrapedEstimate.predicted_departure);
+                    const arrMins = parseTime(scrapedEstimate.predicted_arrival);
+                    const estimatedDur = arrMins - depMins;
+                    
+                    if (estimatedDur > 0 && estimatedDur !== duration) {
+                      return <span>{estimatedDur}m</span>;
+                    }
+                  }
+                  return <span>{duration}m</span>;
+                })()}
               </div>
               
-              {/* Status Column */}
+              {/* Status Column - minutes until estimated departure */}
               <div className={cn(
                 "w-16 shrink-0 text-xs font-medium",
                 isNext ? "text-primary" : "text-zinc-500",
@@ -1580,26 +1683,38 @@ const ScheduleTable = memo(function ScheduleTable({
               )}>
                 {departed && !isNext ? (
                   <span className="text-zinc-400">Gone</span>
-                ) : isNext ? (
-                  (() => {
-                    const departureTimeForCountdown = predictedDeparture
-                      ? (() => {
-                          const predDate = new Date(predictedDepartureData!.predicted!);
-                          return `${predDate.getHours().toString().padStart(2, '0')}:${predDate.getMinutes().toString().padStart(2, '0')}`;
-                        })()
-                      : train.departureTime;
-                    const minutesUntil = getMinutesUntilDeparture(departureTimeForCountdown);
-                    
-                    if (delayMinutes && delayMinutes > 0) {
-                      return (
-                        <span className="text-red-600">+{delayMinutes}m</span>
-                      );
+                ) : (() => {
+                  // Use scraped estimated departure or fall back to scheduled
+                  const getCountdownTime = (): string => {
+                    if (scrapedEstimate?.predicted_departure) {
+                      const match = scrapedEstimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                      if (match) {
+                        let h = parseInt(match[1], 10);
+                        const m = parseInt(match[2], 10);
+                        if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                        if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+                      }
                     }
-                    return minutesUntil !== null ? (
-                      <span className="text-primary font-semibold">{minutesUntil}m</span>
-                    ) : null;
-                  })()
-                ) : null}
+                    if (predictedDeparture && predictedDepartureData?.predicted) {
+                      const predDate = new Date(predictedDepartureData.predicted);
+                      return `${predDate.getHours().toString().padStart(2, '0')}:${predDate.getMinutes().toString().padStart(2, '0')}`;
+                    }
+                    return train.departureTime;
+                  };
+                  
+                  const countdownTime = getCountdownTime();
+                  const minutesUntil = getMinutesUntilDeparture(countdownTime);
+                  
+                  if (minutesUntil !== null && minutesUntil >= 0) {
+                    return (
+                      <span className={isNext ? "text-primary font-semibold" : "text-zinc-500"}>
+                        {minutesUntil}m
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
               
               {/* Train # Column with crowding dot */}
