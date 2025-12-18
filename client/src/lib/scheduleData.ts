@@ -3,6 +3,7 @@ export interface Train {
   departureTime: string;
   arrivalTime: string;
   isExpress: boolean;
+  _tripId?: string;
 }
 
 export interface Schedule {

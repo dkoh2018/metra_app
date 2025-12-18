@@ -88,7 +88,16 @@ async function ensureChromeExecutable(): Promise<string | null> {
     }
 
     try {
-      const buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
+      let buildId: string;
+      try {
+        buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
+        console.log(`Resolved Chrome build ID: ${buildId}`);
+      } catch (idError: any) {
+        console.warn("Failed to resolve Build ID from Google, using fallback:", idError.message);
+        // Fallback to a known recent stable version (Mac/Linux compatible)
+        buildId = '121.0.6167.85'; 
+      }
+
       const executablePath = computeExecutablePath({
         browser: Browser.CHROME,
         buildId,
@@ -103,6 +112,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
           cacheDir,
           unpack: true
         });
+        console.log(`Chrome installed successfully at ${executablePath}`);
       }
 
       chromeExecutablePath = executablePath;
@@ -111,6 +121,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
     } catch (resolveError: any) {
       console.warn("⚠️  Chrome not available - crowding data will be disabled");
       console.warn("   Reason:", resolveError.message);
+      console.warn("   Stack:", resolveError.stack);
       chromeAvailable = false;
       return null;
     }
