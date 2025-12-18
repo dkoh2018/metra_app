@@ -1392,11 +1392,15 @@ const ScheduleTable = memo(function ScheduleTable({
     const currentMinutes = getCurrentMinutesInChicago();
     
     // Service day boundary: 1 AM (60 minutes into the day)
-    // Before 1 AM, we're still on "yesterday's" service day
+    // Trains with departure times from 24:00-25:59 in GTFS are overnight trains
     const SERVICE_DAY_START = 60; // 1:00 AM
-    const isBeforeServiceDayStart = currentMinutes < SERVICE_DAY_START;
+    const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM - after this, early morning trains are "tomorrow"
+    const OVERNIGHT_CUTOFF = 1 * 60; // 1:00 AM - trains before this are "tonight's late" trains
     
-    // GTFS overnight trains (24:XX, 25:XX) are for "next day" - not departed when viewing late at night
+    const isBeforeServiceDayStart = currentMinutes < SERVICE_DAY_START;
+    const isLateNight = currentMinutes >= LATE_NIGHT_THRESHOLD; // After 6 PM
+    
+    // GTFS overnight trains (24:XX, 25:XX) are for "next day"
     if (depHours >= 24) {
       // Normalize to 0-23 range (24:12 -> 0:12)
       const normalizedHours = depHours - 24;
@@ -1414,7 +1418,6 @@ const ScheduleTable = memo(function ScheduleTable({
     const depTotalMinutes = depHours * 60 + depMinutes;
     
     // Before 1 AM: we're still on yesterday's service day
-    // So early morning trains (before 1 AM) that haven't happened yet are NOT departed
     if (isBeforeServiceDayStart) {
       // If train is between midnight and 1 AM, check if it's passed
       if (depTotalMinutes < SERVICE_DAY_START) {
@@ -1424,20 +1427,11 @@ const ScheduleTable = memo(function ScheduleTable({
       return true;
     }
     
-    // After 1 AM: new service day
-    // Early morning trains (before 1 AM) from this calendar day are departed
-    const isEarlyMorningTrain = depTotalMinutes < SERVICE_DAY_START;
-    if (isEarlyMorningTrain) {
-      return true; // These trains ran earlier today (before 1 AM)
-    }
-    
-    // If viewing late at night (after 10 PM), early morning trains (1 AM - 5 AM) 
-    // from TODAY's schedule are definitely departed (they ran 17+ hours ago)
-    const isLateNight = currentMinutes > 22 * 60; // After 10 PM
-    const isEarlyMorningScheduleTrain = depTotalMinutes < 5 * 60; // Before 5 AM
-    
-    if (isLateNight && isEarlyMorningScheduleTrain) {
-      return true; // These trains ran earlier today
+    // Key fix: When viewing late at night (after 6 PM), early morning trains 
+    // (midnight to 1 AM) are TOMORROW's trains, not today's departed trains
+    if (isLateNight && depTotalMinutes < OVERNIGHT_CUTOFF) {
+      // This is an overnight train for tonight/tomorrow - NOT departed yet
+      return false;
     }
     
     // Regular comparison: departed if train time is before current time
