@@ -634,9 +634,12 @@ async function startServer() {
           
           if (cachedData.length > 0) {
             const result = formatCachedData(cachedData);
-            console.log(`Returning cached crowding data for ${origin}->${destination} (${result.crowding.length} trains)`);
+            const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at).getTime()) / 1000 / 60);
+            console.log(`[CACHE HIT] Returning cached crowding data for ${origin}->${destination} (${result.crowding.length} trains, ${cacheAge} min old)`);
             return res.json(result);
           }
+          
+          console.log(`[CACHE MISS] No fresh cache for ${origin}->${destination} (checking for stale cache or scraping...)`);
         }
         
         if (scrapingLocks.has(cacheKey)) {
@@ -668,7 +671,16 @@ async function startServer() {
           updated_at: string;
         }>;
         
-        console.log(`Cache miss for ${origin}->${destination}, scraping...`);
+        console.log(`[CACHE MISS] No fresh cache (< 5 min) for ${origin}->${destination}, checking stale cache or scraping...`);
+        
+        // Log stale cache availability
+        if (staleCache.length > 0) {
+          const oldestAge = Math.round((Date.now() - new Date(staleCache[staleCache.length - 1].updated_at).getTime()) / 1000 / 60);
+          const newestAge = Math.round((Date.now() - new Date(staleCache[0].updated_at).getTime()) / 1000 / 60);
+          console.log(`[CACHE] Stale cache available: ${staleCache.length} entries (${newestAge}-${oldestAge} min old) - will use if scraping fails`);
+        } else {
+          console.log(`[CACHE] No stale cache available for ${origin}->${destination}`);
+        }
         
         const scrapePromise = (async () => {
           let scrapeBrowser: any = null;
@@ -754,16 +766,18 @@ async function startServer() {
               }>();
               
               const debug: string[] = [];
-              debug.push(`Scraping Origin: ${scrapeOrigin}, Dest: ${scrapeDest}`);
+              debug.push(`[SCRAPER] Starting extraction for ${scrapeOrigin} -> ${scrapeDest}`);
+              debug.push(`[SCRAPER] Looking for cell IDs containing: "${scrapeOrigin.toUpperCase()}" (origin) and "${scrapeDest.toUpperCase()}" (dest)`);
               
               // First: Extract crowding from .trip-row elements
               const tripRows = Array.from(document.querySelectorAll('.trip-row'));
               if (tripRows.length > 0) {
-                 debug.push(`Found ${tripRows.length} trip rows. First 3 IDs: ${tripRows.slice(0, 3).map(r => r.getAttribute('id')).join(', ')}`);
+                 const firstIds = tripRows.slice(0, 3).map(r => r.getAttribute('id')).filter(Boolean);
+                 debug.push(`[TRIP ROWS] Found ${tripRows.length} trip rows. Sample IDs: ${firstIds.join(', ')}`);
               } else {
-                 debug.push('WARNING: No .trip-row elements found!');
+                 debug.push('[TRIP ROWS] WARNING: No .trip-row elements found!');
                  // Log body content to debug selector failure
-                 debug.push(`Body start: ${document.body.innerHTML.substring(0, 500)}...`);
+                 debug.push(`[TRIP ROWS] Body preview: ${document.body.innerHTML.substring(0, 500)}...`);
               }
               
               tripRows.forEach((tripCell: Element) => {
@@ -799,7 +813,18 @@ async function startServer() {
               // Second: Extract estimated times from ALL td.stop elements (don't rely on has-exception class)
               // These have IDs like "UP-NW_UNW672_V3_APALATINE" (trip_id + "_" + stop)
               const estimatedStops = Array.from(document.querySelectorAll('td.stop'));
-              debug.push(`Found ${estimatedStops.length} total stop cells`);
+              debug.push(`[STOP CELLS] Found ${estimatedStops.length} total stop cells`);
+              
+              // Count how many match our origin/dest
+              const originMatches = estimatedStops.filter(cell => {
+                const cellId = cell.getAttribute('id') || '';
+                return cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
+              }).length;
+              const destMatches = estimatedStops.filter(cell => {
+                const cellId = cell.getAttribute('id') || '';
+                return cellId.toUpperCase().includes(scrapeDest.toUpperCase());
+              }).length;
+              debug.push(`[STOP CELLS] Matches: ${originMatches} with "${scrapeOrigin.toUpperCase()}", ${destMatches} with "${scrapeDest.toUpperCase()}"`);
               
               estimatedStops.forEach((cell: Element, index: number) => {
                 // Check if this cell has a strike-through time (indicating delay/change)
@@ -825,6 +850,11 @@ async function startServer() {
                 // Use the actual origin/dest passed from the scraper (case insensitive)
                 const isOriginStop = cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
                 const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
+                
+                // Debug logging for first few matches to verify station matching works
+                if (index < 3 && (isOriginStop || isDestStop)) {
+                  debug.push(`[MATCH] CellId: ${cellId} | Origin: ${scrapeOrigin} (${isOriginStop ? 'MATCH' : 'no'}) | Dest: ${scrapeDest} (${isDestStop ? 'MATCH' : 'no'})`);
+                }
                 
                 // Get the estimated time from the cell
                 // We already have stopText and strikeOut from above
@@ -854,10 +884,16 @@ async function startServer() {
                 }
               });
 
-              // Final Summary
+              // Final Summary with detailed breakdown
               const crowdingFound = Array.from(resultsMap.values()).filter(r => r.crowding !== 'low').length;
               const estimatesFound = Array.from(resultsMap.values()).filter(r => r.estimated_departure || r.estimated_arrival).length;
-              debug.push(`SCRAPER SUMMARY: Total Trips: ${resultsMap.size}, Crowding Updates: ${crowdingFound}, Estimates Found: ${estimatesFound}`);
+              const withDepartureEst = Array.from(resultsMap.values()).filter(r => r.estimated_departure).length;
+              const withArrivalEst = Array.from(resultsMap.values()).filter(r => r.estimated_arrival).length;
+              
+              debug.push(`SCRAPER SUMMARY: Total Trips: ${resultsMap.size}`);
+              debug.push(`  └─ Crowding Updates: ${crowdingFound} (low: ${resultsMap.size - crowdingFound}, some/moderate/high: ${crowdingFound})`);
+              debug.push(`  └─ Estimated Times: ${estimatesFound} total (departures: ${withDepartureEst}, arrivals: ${withArrivalEst})`);
+              debug.push(`  └─ Origin: ${scrapeOrigin}, Dest: ${scrapeDest}`);
               
               return { crowding: Array.from(resultsMap.values()), debug };
             }, origin, destination);
@@ -871,16 +907,30 @@ async function startServer() {
               throw new Error('No crowding data extracted from Metra website');
             }
             
-            console.log(`Extracted crowding data for ${extractedData.crowding.length} trains`);
-            // DEBUG: Show what kind of data we got (first 3 items) to simplify debugging on Railway
-            console.log("DEBUG EXTRACTED SAMPLE:", JSON.stringify(extractedData.crowding.slice(0, 3), null, 2));
+            console.log(`[CROWDING] Extracted data for ${origin}->${destination} (${extractedData.crowding.length} trains)`);
             
-            // Count how many have estimated times
+            // Count statistics
+            const withCrowding = extractedData.crowding.filter((item: any) => item.crowding !== 'low').length;
             const withEstimates = extractedData.crowding.filter(
               (item: any) => item.estimated_departure || item.estimated_arrival
             ).length;
+            const withDepartureEst = extractedData.crowding.filter((item: any) => item.estimated_departure).length;
+            const withArrivalEst = extractedData.crowding.filter((item: any) => item.estimated_arrival).length;
+            
+            console.log(`  └─ Crowding levels: ${withCrowding} non-low (${extractedData.crowding.length - withCrowding} low)`);
             if (withEstimates > 0) {
-              console.log(`  └─ ${withEstimates} trains have estimated/delayed times`);
+              console.log(`  └─ Estimated times: ${withEstimates} trains (${withDepartureEst} departures, ${withArrivalEst} arrivals)`);
+            }
+            
+            // Show sample for debugging (first train with non-low crowding or estimates)
+            const sampleTrain = extractedData.crowding.find((item: any) => 
+              item.crowding !== 'low' || item.estimated_departure || item.estimated_arrival
+            ) || extractedData.crowding[0];
+            
+            if (sampleTrain) {
+              console.log(`  └─ Sample: ${sampleTrain.trip_id} | Crowding: ${sampleTrain.crowding} | ` +
+                `Dep: ${sampleTrain.scheduled_departure}${sampleTrain.estimated_departure ? ` -> ${sampleTrain.estimated_departure}` : ''} | ` +
+                `Arr: ${sampleTrain.scheduled_arrival}${sampleTrain.estimated_arrival ? ` -> ${sampleTrain.estimated_arrival}` : ''}`);
             }
             
             const { getDatabase: getDbForCache } = await import("./db/schema.js");
@@ -923,7 +973,36 @@ async function startServer() {
               });
               
               transaction();
-              console.log(`Cached crowding data for ${origin}->${destination}`);
+              const savedCount = extractedData.crowding.length;
+              console.log(`[CACHE SAVE] Saved ${savedCount} entries to database for ${origin}->${destination} (using INSERT OR REPLACE - updates existing, no duplicates)`);
+              
+              // Verify no duplicates exist (should always be 0 due to unique constraint)
+              const duplicateCheck = dbForCache.prepare(`
+                SELECT origin, destination, trip_id, COUNT(*) as count
+                FROM crowding_cache
+                WHERE origin = ? AND destination = ?
+                GROUP BY origin, destination, trip_id
+                HAVING count > 1
+              `).all(origin, destination);
+              
+              if (duplicateCheck.length > 0) {
+                console.warn(`[CACHE WARNING] Found ${duplicateCheck.length} duplicate entries for ${origin}->${destination} (this should not happen!)`);
+              } else {
+                console.log(`[CACHE VERIFY] No duplicates found for ${origin}->${destination} (unique constraint working correctly)`);
+              }
+              
+              // Show cache statistics for this origin/destination
+              const cacheStats = dbForCache.prepare(`
+                SELECT COUNT(*) as total, 
+                       MIN(updated_at) as oldest,
+                       MAX(updated_at) as newest
+                FROM crowding_cache
+                WHERE origin = ? AND destination = ?
+              `).get(origin, destination) as { total: number; oldest: string; newest: string };
+              
+              if (cacheStats) {
+                console.log(`[CACHE STATS] ${origin}->${destination}: ${cacheStats.total} total entries (oldest: ${cacheStats.oldest}, newest: ${cacheStats.newest})`);
+              }
             } catch (cacheError: any) {
               console.warn(`Failed to cache data: ${cacheError.message}`);
             }
@@ -988,11 +1067,14 @@ async function startServer() {
           }
           
           if (staleCache.length > 0) {
-            console.log(`Falling back to stale cache (${staleCache.length} entries)`);
+            const oldestEntry = staleCache[staleCache.length - 1];
+            const ageHours = Math.round((Date.now() - new Date(oldestEntry.updated_at).getTime()) / (1000 * 60 * 60));
+            console.log(`[CROWDING] Scraping failed for ${origin}->${destination}, falling back to stale cache (${staleCache.length} entries, ~${ageHours}h old)`);
             const result = formatCachedData(staleCache);
             return res.json(result);
           }
           
+          console.warn(`[CROWDING] No data available for ${origin}->${destination} (scraping failed, no stale cache)`);
           return res.json({ crowding: [] });
         }
       } catch (error: any) {

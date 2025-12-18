@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { RotateCcw } from 'lucide-react';
 import L from 'leaflet';
@@ -344,6 +344,9 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const [schedule, setSchedule] = useState<TripSchedule[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
   
+  // Ref to track popup container for scroll event handling
+  const popupContainerRef = useRef<HTMLDivElement | null>(null);
+  
   // User GPS location state (no caching - only in-memory while on app)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [userLocationIcon, setUserLocationIcon] = useState<L.DivIcon | null>(null);
@@ -497,6 +500,51 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
     };
   }, []);
 
+  // Prevent map zoom when scrolling inside popup
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target) return;
+
+      // Check if the event is inside a Leaflet popup
+      const popup = target.closest('.leaflet-popup-content-wrapper');
+      if (popup) {
+        // Check if the scroll is happening inside a scrollable area
+        // Look for elements with overflow-y-auto or max-height that are scrollable
+        let scrollableElement = target;
+        while (scrollableElement && scrollableElement !== popup) {
+          const style = window.getComputedStyle(scrollableElement);
+          const isScrollable = 
+            (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+            scrollableElement.scrollHeight > scrollableElement.clientHeight;
+          
+          if (isScrollable) {
+            // Check if we can actually scroll in this direction
+            const canScrollUp = scrollableElement.scrollTop > 0;
+            const canScrollDown = 
+              scrollableElement.scrollTop < 
+              scrollableElement.scrollHeight - scrollableElement.clientHeight;
+            
+            if ((e.deltaY < 0 && canScrollUp) || (e.deltaY > 0 && canScrollDown)) {
+              // We're scrolling inside the popup, prevent map zoom
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+              return;
+            }
+          }
+          scrollableElement = scrollableElement.parentElement as HTMLElement;
+        }
+      }
+    };
+
+    // Use capture phase to catch events before they reach the map
+    document.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+
+    return () => {
+      document.removeEventListener('wheel', handleWheel, { capture: true });
+    };
+  }, []);
+
   // Count trains by direction (Global Total)
   const inboundCount = trains.filter(t => t.direction === 'inbound').length;
   const outboundCount = trains.filter(t => t.direction === 'outbound').length;
@@ -603,7 +651,11 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                     }
                   }}
                 >
-                <Popup className="train-popup" minWidth={280} maxWidth={280}>
+                <Popup 
+                  className="train-popup" 
+                  minWidth={280} 
+                  maxWidth={280}
+                >
                   <div className="p-1">
                     <div className="flex items-center justify-between mb-2 pb-2 border-b border-zinc-100">
                       <div>
@@ -628,7 +680,18 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                         <div className="text-xs text-zinc-400">Loading schedule...</div>
                       </div>
                     ) : selectedTripId === train.tripId && schedule.length > 0 ? (
-                      <div className="max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
+                      <div 
+                        className="max-h-[200px] overflow-y-auto pr-1 custom-scrollbar"
+                        onWheel={(e) => {
+                          // Stop scroll events from propagating to the map
+                          // This prevents map zooming when scrolling inside the popup
+                          e.stopPropagation();
+                        }}
+                        style={{
+                          scrollBehavior: 'smooth',
+                          WebkitOverflowScrolling: 'touch'
+                        }}
+                      >
                         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Next Stops</div>
                         <div className="space-y-px">
                           {schedule.filter(stop => {

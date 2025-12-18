@@ -61,6 +61,22 @@ const CROWDING_LABELS: Record<CrowdingLevel, string> = {
   high: "High"
 };
 
+// Helper function to parse time string to minutes (handles both "8:13 PM" and "19:13" formats)
+function parseTimeToMinutes(timeStr: string): number {
+  const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (match) {
+    let h = parseInt(match[1], 10);
+    const m = parseInt(match[2], 10);
+    const meridian = match[3]?.toUpperCase();
+    if (meridian === 'PM' && h !== 12) h += 12;
+    if (meridian === 'AM' && h === 12) h = 0;
+    return h * 60 + m;
+  }
+  // Fallback: simple 24h split "19:12"
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
+
 function formatPredictedTimeDisplay(timeStr?: string | null): string | null {
   if (!timeStr) return null;
 
@@ -255,6 +271,22 @@ export default function Schedule() {
     return () => clearInterval(timer);
   }, []);
 
+  // Memoize currentMinutes to only change when the minute value changes
+  // This prevents unnecessary re-renders when seconds change but minute stays the same
+  // Extract hour:minute from currentTime in Chicago timezone as the dependency key
+  const currentMinutesKey = useMemo(() => {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Chicago',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    }).format(currentTime);
+  }, [currentTime]);
+
+  const currentMinutes = useMemo(() => {
+    return getCurrentMinutesInChicago();
+  }, [currentMinutesKey]);
+
   // Fetch schedule data from GTFS API
   useEffect(() => {
     setScheduleLoading(true);
@@ -403,8 +435,25 @@ export default function Schedule() {
     };
   }, [direction, selectedGtfsId]);
 
-  // Fetch crowding data
+  // Fetch crowding data (uses DB cache via backend, persists to localStorage for instant display)
   useEffect(() => {
+    // Load from localStorage first (instant display of DB values from last session)
+    const reloadFromStorage = () => {
+      try {
+        const saved = localStorage.getItem(`crowding_${selectedGtfsId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved) as Record<string, CrowdingLevel>;
+          const loaded = new Map(Object.entries(parsed));
+          setCrowdingData(loaded);
+          console.debug(`[CROWDING] Loaded ${loaded.size} entries from localStorage (DB values from last session) for ${selectedStation.name}`);
+        } else {
+          console.debug(`[CROWDING] No localStorage data for ${selectedStation.name}, will load from DB via API`);
+        }
+      } catch (error) {
+        console.debug('Could not load crowding data from localStorage:', error);
+      }
+    };
+
     const fetchCrowding = (forceRefresh = false) => {
       if (isFetchingCrowdingRef.current && !forceRefresh) {
         return;
@@ -420,7 +469,7 @@ export default function Schedule() {
       const terminalId = selectedStation.terminal || 'OTC';
       const lineId = selectedStation.line || 'UP-NW';
       
-      const palatineToChicago = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=${terminalId}&line=${lineId}${forceParam}`)
+      const stationToTerminal = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=${terminalId}&line=${lineId}${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -432,7 +481,7 @@ export default function Schedule() {
           return null;
         });
       
-      const chicagoToPalatine = fetch(`/api/crowding?origin=${terminalId}&destination=${selectedGtfsId}&line=${lineId}${forceParam}`)
+      const terminalToStation = fetch(`/api/crowding?origin=${terminalId}&destination=${selectedGtfsId}&line=${lineId}${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -444,10 +493,10 @@ export default function Schedule() {
           return null;
         });
       
-      Promise.all([palatineToChicago, chicagoToPalatine])
-        .then(([palatineData, chicagoData]) => {
+      Promise.all([stationToTerminal, terminalToStation])
+        .then(([stationData, terminalData]) => {
           // If both failed, don't update anything to preserve stale (but visible) data
-          if (!palatineData && !chicagoData) {
+          if (!stationData && !terminalData) {
             console.debug('Both crowding requests failed, preserving partial data');
             return;
           }
@@ -491,44 +540,79 @@ export default function Schedule() {
             });
           };
 
-          processData(palatineData);
-          processData(chicagoData);
+          processData(stationData);
+          processData(terminalData);
           
-          // If we had at least one success, update state
-          // Using callback to merge if one side failed? 
-          // For now, simpler: if one side failed, we treat it as "no data for that direction" 
-          // but we still update. To be perfect we might want to merge with prev state for the failed direction.
-          // But "both failed" check above covers the worst case (total wipe).
-          // If one fails, we might lose half the data. 
-          // Let's implement a merge strategy for partial failure.
-          
+          // Smart merge strategy: preserve existing data for failed directions
           setCrowdingData(prev => {
-             // If both succeeded, replace entirely
-             if (palatineData && chicagoData) return crowdingMap;
+             // If both succeeded, replace entirely with fresh data
+             if (stationData && terminalData) {
+               console.debug('Crowding: both directions succeeded, replacing all data');
+               // Save to localStorage for instant display on next page load
+               try {
+                 const toSave = Object.fromEntries(crowdingMap);
+                 localStorage.setItem(`crowding_${selectedGtfsId}`, JSON.stringify(toSave));
+               } catch (error) {
+                 console.debug('Could not save crowding data to localStorage:', error);
+               }
+               return crowdingMap;
+             }
              
-             // If partial success, merge with previous (simple approach: keep old keys not in new?)
-             // Actually, simplest improvement is just blocking the "Both Failed" case.
-             // Partial failure is rare (usually server is down or up).
-             return crowdingMap;
+             // If partial success, merge new data with existing data
+             // This prevents losing data from the direction that failed
+             const merged = new Map(prev);
+             
+             // Add/update entries from successful direction(s)
+             crowdingMap.forEach((value, key) => {
+               merged.set(key, value);
+             });
+             
+             if (!stationData) {
+               console.debug('Crowding: station->terminal failed, preserving existing outbound data');
+             }
+             if (!terminalData) {
+               console.debug('Crowding: terminal->station failed, preserving existing inbound data');
+             }
+             
+             // Save merged data to localStorage
+             try {
+               const toSave = Object.fromEntries(merged);
+               localStorage.setItem(`crowding_${selectedGtfsId}`, JSON.stringify(toSave));
+             } catch (error) {
+               console.debug('Could not save crowding data to localStorage:', error);
+             }
+             
+             return merged;
           });
           
-           setEstimatedTimes(prev => {
-             if (palatineData && chicagoData) return estimatedMap;
+          setEstimatedTimes(prev => {
+             // If both succeeded, replace entirely with fresh data
+             if (stationData && terminalData) {
+               return estimatedMap;
+             }
              
-             // If we have some data but not all, we return what we found. 
-             // Ideally we'd keep the old data for the missing direction.
-             // But detecting which direction is missing is tricky without more logic.
-             // For now, just returning the map is safer than wiping.
-             return estimatedMap;
-           });
+             // If partial success, merge new data with existing data
+             const merged = new Map(prev);
+             
+             // Add/update entries from successful direction(s)
+             estimatedMap.forEach((value, key) => {
+               merged.set(key, value);
+             });
+             
+             return merged;
+          });
 
           
 
 
+          const stationDirection = `${selectedStation.name}->${terminalId === 'OTC' ? 'Chicago OTC' : 'Chicago CUS'}`;
+          const terminalDirection = `${terminalId === 'OTC' ? 'Chicago OTC' : 'Chicago CUS'}->${selectedStation.name}`;
+          
           console.debug(
-            `Crowding: updated ${crowdingMap.size} train entries, ${estimatedMap.size} with estimated times (Palatine->Chicago: ${
-              palatineData.crowding?.length || 0
-            }, Chicago->Palatine: ${chicagoData.crowding?.length || 0})`
+            `Crowding: ${stationData && terminalData ? 'Both directions' : 'Partial'} update - ` +
+            `${crowdingMap.size} train entries, ${estimatedMap.size} with estimated times | ` +
+            `${stationDirection}: ${stationData?.crowding?.length || 0} trains ${stationData ? '✓' : '✗'} | ` +
+            `${terminalDirection}: ${terminalData?.crowding?.length || 0} trains ${terminalData ? '✓' : '✗'}`
           );
         })
         .catch(error => {
@@ -541,6 +625,10 @@ export default function Schedule() {
     
     fetchCrowdingRef.current = fetchCrowding;
     
+    // Load from localStorage first (instant display of DB values from last session)
+    reloadFromStorage();
+    
+    // Then fetch from API (which uses DB cache - seamless update if new data available)
     fetchCrowding();
     
     // Visibility-based polling - stop when tab is hidden, resume when visible
@@ -707,7 +795,7 @@ export default function Schedule() {
     });
     
     return next || trains[0] || null;
-  }, [dayType, currentTime, direction, scheduleData, estimatedTimes]);
+  }, [dayType, direction, scheduleData, estimatedTimes]);
   
   useEffect(() => {
     if (nextTrain?.id !== computedNextTrain?.id) {
@@ -1120,18 +1208,8 @@ export default function Schedule() {
                           const pred = scrapedEstimate.predicted_departure;
                           
                           // Parse times to calculate difference
-                          const parseTime = (t: string) => {
-                            const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                            if (!match) return 0;
-                            let h = parseInt(match[1], 10);
-                            const m = parseInt(match[2], 10);
-                            if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-                            if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
-                            return h * 60 + m;
-                          };
-                          
-                          const schedMins = parseTime(sched);
-                          const predMins = parseTime(pred);
+                          const schedMins = parseTimeToMinutes(sched);
+                          const predMins = parseTimeToMinutes(pred);
                           const diffMins = predMins - schedMins;
                           
                           if (diffMins !== 0) {
@@ -1221,18 +1299,8 @@ export default function Schedule() {
                         const pred = scrapedEstimate.predicted_arrival;
                         
                         // Parse times to calculate difference
-                        const parseTime = (t: string) => {
-                          const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                          if (!match) return 0;
-                          let h = parseInt(match[1], 10);
-                          const m = parseInt(match[2], 10);
-                          if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-                          if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
-                          return h * 60 + m;
-                        };
-                        
-                        const schedMins = parseTime(sched);
-                        const predMins = parseTime(pred);
+                        const schedMins = parseTimeToMinutes(sched);
+                        const predMins = parseTimeToMinutes(pred);
                         const diffMins = predMins - schedMins;
                         
                         if (diffMins !== 0) {
@@ -1262,18 +1330,8 @@ export default function Schedule() {
                   {(() => {
                     // Calculate duration from estimated times if available
                     if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
-                      const parseTime = (t: string) => {
-                        const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                        if (!match) return 0;
-                        let h = parseInt(match[1], 10);
-                        const m = parseInt(match[2], 10);
-                        if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-                        if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
-                        return h * 60 + m;
-                      };
-                      
-                      const depMins = parseTime(scrapedEstimate.predicted_departure);
-                      const arrMins = parseTime(scrapedEstimate.predicted_arrival);
+                      const depMins = parseTimeToMinutes(scrapedEstimate.predicted_departure);
+                      const arrMins = parseTimeToMinutes(scrapedEstimate.predicted_arrival);
                       let estimatedDuration = arrMins - depMins;
                       
                       // Handle overnight trains (e.g. 11 PM to 12 AM)
@@ -1324,7 +1382,7 @@ export default function Schedule() {
             crowdingData={crowdingData}
             estimatedTimes={estimatedTimes}
             calculateDuration={memoizedCalculateDuration}
-            currentTime={currentTime}
+            currentMinutes={currentMinutes}
             direction={direction}
           />
         </div>
@@ -1357,7 +1415,7 @@ const ScheduleTable = memo(function ScheduleTable({
   crowdingData,
   estimatedTimes,
   calculateDuration,
-  currentTime,
+  currentMinutes,
   direction,
 }: { 
   trains: Train[], 
@@ -1374,7 +1432,7 @@ const ScheduleTable = memo(function ScheduleTable({
     predicted_arrival: string | null;
   }>,
   calculateDuration: (dep: string, arr: string) => number,
-  currentTime: Date,
+  currentMinutes: number,
   direction: Direction,
 }) {
   const nextTrainRef = useRef<HTMLDivElement | null>(null);
@@ -1454,9 +1512,8 @@ const ScheduleTable = memo(function ScheduleTable({
     return formatPredictedTimeDisplay(timeStr);
   };
 
-  const hasDeparted = (departureTime: string): boolean => {
+  const hasDeparted = (departureTime: string, currentMinutesValue: number): boolean => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
-    const currentMinutes = getCurrentMinutesInChicago();
     
     // Service day boundary: 1 AM (60 minutes into the day)
     // Trains with departure times from 24:00-25:59 in GTFS are overnight trains
@@ -1464,8 +1521,8 @@ const ScheduleTable = memo(function ScheduleTable({
     const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM - after this, early morning trains are "tomorrow"
     const OVERNIGHT_CUTOFF = 1 * 60; // 1:00 AM - trains before this are "tonight's late" trains
     
-    const isBeforeServiceDayStart = currentMinutes < SERVICE_DAY_START;
-    const isLateNight = currentMinutes >= LATE_NIGHT_THRESHOLD; // After 6 PM
+    const isBeforeServiceDayStart = currentMinutesValue < SERVICE_DAY_START;
+    const isLateNight = currentMinutesValue >= LATE_NIGHT_THRESHOLD; // After 6 PM
     
     // GTFS overnight trains (24:XX, 25:XX) are for "next day"
     if (depHours >= 24) {
@@ -1477,8 +1534,8 @@ const ScheduleTable = memo(function ScheduleTable({
       // Then we can compare directly as we are effectively in the "same" extended day
       const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
       
-      if (currentMinutes < EARLY_MORNING_CUTOFF) {
-        return normalizedMinutes < currentMinutes;
+      if (currentMinutesValue < EARLY_MORNING_CUTOFF) {
+        return normalizedMinutes < currentMinutesValue;
       }
       
       // Otherwise, if we are later in the day (4 AM - 23:59)
@@ -1492,7 +1549,7 @@ const ScheduleTable = memo(function ScheduleTable({
     if (isBeforeServiceDayStart) {
       // If train is between midnight and 1 AM, check if it's passed
       if (depTotalMinutes < SERVICE_DAY_START) {
-        return depTotalMinutes < currentMinutes;
+        return depTotalMinutes < currentMinutesValue;
       }
       // Trains after 1 AM are all departed (from yesterday)
       return true;
@@ -1506,19 +1563,18 @@ const ScheduleTable = memo(function ScheduleTable({
     }
     
     // Regular comparison: departed if train time is before current time
-    return depTotalMinutes < currentMinutes;
+    return depTotalMinutes < currentMinutesValue;
   };
 
-  const getMinutesUntilDeparture = (departureTime: string): number | null => {
+  const getMinutesUntilDeparture = (departureTime: string, currentMinutesValue: number): number | null => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
-    const currentMinutes = getCurrentMinutesInChicago();
     
     // Handle GTFS overnight format (24:XX = tomorrow's AM hours)
     // For 24:12, depTotalMinutes = 24*60 + 12 = 1452
     // At current 23:22 (1402), minutes until = 1452 - 1402 = 50
     const depTotalMinutes = depHours * 60 + depMinutes;
     
-    let minutesUntil = depTotalMinutes - currentMinutes;
+    let minutesUntil = depTotalMinutes - currentMinutesValue;
     
     // If negative but within reasonable range, train already departed
     if (minutesUntil < 0 && minutesUntil > -60) {
@@ -1532,6 +1588,55 @@ const ScheduleTable = memo(function ScheduleTable({
     
     return minutesUntil > 0 && minutesUntil < 1440 ? minutesUntil : null;
   };
+
+  // Memoize hasDeparted calculations for all trains to avoid recalculating on every render
+  const departedMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    trains.forEach(train => {
+      map.set(train.id, hasDeparted(train.departureTime, currentMinutes));
+    });
+    return map;
+  }, [trains, currentMinutes]);
+
+  // Memoize getMinutesUntilDeparture calculations for all trains
+  // This accounts for estimated departure times (scraped or predicted)
+  const minutesUntilMap = useMemo(() => {
+    const map = new Map<string, number | null>();
+    trains.forEach(train => {
+      const tripId = tripIdMap.get(train.id);
+      const predictedDepartureData = tripId ? predictedTimes.get(`${tripId}_departure`) : null;
+      const scrapedEstimate = estimatedTimes.get(train.id);
+      
+      // Determine the countdown time (same logic as getCountdownTime in render)
+      let countdownTime = train.departureTime;
+      
+      // Priority 1: Use scraped estimated departure if available
+      if (scrapedEstimate?.predicted_departure) {
+        const match = scrapedEstimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (match) {
+          let h = parseInt(match[1], 10);
+          const m = parseInt(match[2], 10);
+          if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+          if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+          countdownTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+      } 
+      // Priority 2: Use real-time API prediction if available and reasonable
+      else if (predictedDepartureData?.predicted && 
+               isPredictedTimeReasonable(
+                 predictedDepartureData.predicted,
+                 predictedDepartureData.scheduled,
+                 train.departureTime
+               )) {
+        const predDate = new Date(predictedDepartureData.predicted);
+        countdownTime = `${predDate.getHours().toString().padStart(2, '0')}:${predDate.getMinutes().toString().padStart(2, '0')}`;
+      }
+      // Default: use scheduled departure time
+      
+      map.set(train.id, getMinutesUntilDeparture(countdownTime, currentMinutes));
+    });
+    return map;
+  }, [trains, currentMinutes, tripIdMap, predictedTimes, estimatedTimes]);
 
   return (
     <div className="rounded-xl border border-zinc-200 shadow-sm overflow-hidden bg-white">
@@ -1560,7 +1665,7 @@ const ScheduleTable = memo(function ScheduleTable({
           const realtimeDelay = tripId ? delays.get(tripId) : null;
           const predictedDepartureData = tripId ? predictedTimes.get(`${tripId}_departure`) : null;
           const predictedArrivalData = tripId ? predictedTimes.get(`${tripId}_arrival`) : null;
-          const departed = hasDeparted(train.departureTime);
+          const departed = departedMap.get(train.id) ?? false;
           
           // Get scraped estimated times (from Metra website)
           const scrapedEstimate = estimatedTimes.get(train.id);
@@ -1653,22 +1758,11 @@ const ScheduleTable = memo(function ScheduleTable({
                 departed && !isNext && "text-zinc-400"
               )}>
                 {(() => {
-                  // Parse time to minutes for comparison
-                  const parseTime = (t: string) => {
-                    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-                    if (!match) return 0;
-                    let h = parseInt(match[1], 10);
-                    const m = parseInt(match[2], 10);
-                    if (match[3]?.toUpperCase() === 'PM' && h !== 12) h += 12;
-                    if (match[3]?.toUpperCase() === 'AM' && h === 12) h = 0;
-                    return h * 60 + m;
-                  };
-                  
                   // Use scraped estimated departure if available
                   if (scrapedEstimate?.predicted_departure && scrapedEstimate?.scheduled_departure) {
                     const pred = scrapedEstimate.predicted_departure;
-                    const schedMins = parseTime(scrapedEstimate.scheduled_departure);
-                    const predMins = parseTime(pred);
+                    const schedMins = parseTimeToMinutes(scrapedEstimate.scheduled_departure);
+                    const predMins = parseTimeToMinutes(pred);
                     const diffMins = predMins - schedMins;
                     
                     if (diffMins > 0) {
@@ -1694,22 +1788,11 @@ const ScheduleTable = memo(function ScheduleTable({
                 departed && !isNext && "text-zinc-400"
               )}>
                 {(() => {
-                  // Parse time to minutes for comparison
-                  const parseTime = (t: string) => {
-                    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-                    if (!match) return 0;
-                    let h = parseInt(match[1], 10);
-                    const m = parseInt(match[2], 10);
-                    if (match[3]?.toUpperCase() === 'PM' && h !== 12) h += 12;
-                    if (match[3]?.toUpperCase() === 'AM' && h === 12) h = 0;
-                    return h * 60 + m;
-                  };
-                  
                   // Use scraped estimated arrival if available
                   if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
                     const pred = scrapedEstimate.predicted_arrival;
-                    const schedMins = parseTime(scrapedEstimate.scheduled_arrival);
-                    const predMins = parseTime(pred);
+                    const schedMins = parseTimeToMinutes(scrapedEstimate.scheduled_arrival);
+                    const predMins = parseTimeToMinutes(pred);
                     const diffMins = predMins - schedMins;
                     
                     if (diffMins > 0) {
@@ -1748,26 +1831,8 @@ const ScheduleTable = memo(function ScheduleTable({
                   <span className="text-zinc-400">Gone</span>
                 ) : (() => {
                   // Use scraped estimated departure or fall back to scheduled
-                  const getCountdownTime = (): string => {
-                    if (scrapedEstimate?.predicted_departure) {
-                      const match = scrapedEstimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                      if (match) {
-                        let h = parseInt(match[1], 10);
-                        const m = parseInt(match[2], 10);
-                        if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-                        if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
-                        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-                      }
-                    }
-                    if (predictedDeparture && predictedDepartureData?.predicted) {
-                      const predDate = new Date(predictedDepartureData.predicted);
-                      return `${predDate.getHours().toString().padStart(2, '0')}:${predDate.getMinutes().toString().padStart(2, '0')}`;
-                    }
-                    return train.departureTime;
-                  };
-                  
-                  const countdownTime = getCountdownTime();
-                  const minutesUntil = getMinutesUntilDeparture(countdownTime);
+                  // Use pre-calculated minutes until departure from memoized map
+                  const minutesUntil = minutesUntilMap.get(train.id) ?? null;
                   
                   if (minutesUntil !== null && minutesUntil >= 0) {
                     const hours = Math.floor(minutesUntil / 60);
