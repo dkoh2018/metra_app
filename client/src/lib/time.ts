@@ -68,12 +68,12 @@ export function getDayType(date: Date): 'weekday' | 'saturday' | 'sunday' {
 
 /**
  * Get day type based on "Service Day" (Metra service extends past midnight).
- * Trains running between 12:00 AM and 3:30 AM are usually part of the *previous* day's schedule.
+ * Trains running between 12:00 AM and 4:00 AM are usually part of the *previous* day's schedule.
  */
 export function getServiceDayType(date: Date): 'weekday' | 'saturday' | 'sunday' {
-  // Clone date and subtract 3.5 hours to handle late night service (until 3:30 AM) as previous day
+  // Clone date and subtract 4 hours to handle late night service (until 4:00 AM) as previous day
   const adjustedDate = new Date(date);
-  adjustedDate.setMinutes(adjustedDate.getMinutes() - 210); // -3.5 hours
+  adjustedDate.setMinutes(adjustedDate.getMinutes() - 240); // -4 hours
   return getDayType(adjustedDate);
 }
 
