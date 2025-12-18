@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Train } from '@/lib/scheduleData';
-import { ArrowRight, Clock, RefreshCw, ArrowLeftRight, AlertTriangle, ExternalLink, X, Info, AlertCircle } from 'lucide-react';
+import { ArrowRight, Clock, RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getChicagoTime, getServiceDayType, getCurrentMinutesInChicago, formatChicagoTime } from '@/lib/time';
 
@@ -9,13 +9,15 @@ import { DayType, Direction, CrowdingLevel, ApiTrain, ApiSchedule, ApiAlerts } f
 import { parseTimeToMinutes, formatPredictedTimeDisplay, calculateDuration, getChicagoMinutesFromTimeString, isPredictedTimeReasonable } from '@/lib/time-utils';
 import { transformTrain, getTrainMinutesForComparison, TRIP_ID_REGEX, TIME_PATTERN_REGEX, CROWDING_DOT_STYLES, CROWDING_LABELS } from '@/lib/schedule-helpers';
 import { ScheduleTable } from '@/components/schedule/ScheduleTable';
-
+import { ScheduleAlerts } from '@/components/schedule/ScheduleAlerts';
+import { ScheduleHeader } from '@/components/schedule/ScheduleHeader';
+import { useScheduleData } from '@/hooks/useScheduleData';
 
 
 
 // Lazy load the map component since it's heavy
 const TrainMap = lazy(() => import('@/components/TrainMap'));
-import { StationSelector } from '@/components/StationSelector';
+
 import { STATIONS, Station } from '@/lib/stations';
 
 // Legacy styles kept until verified unused or moved
@@ -29,38 +31,11 @@ const CROWDING_BADGE_STYLES: Record<CrowdingLevel, string> = {
 
 
 export default function Schedule() {
-  const [currentTime, setCurrentTime] = useState(getChicagoTime());
-  const [dayType, setDayType] = useState<DayType>('weekday');
   const [direction, setDirection] = useState<Direction>('inbound');
   const [nextTrain, setNextTrain] = useState<Train | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [scheduleData, setScheduleData] = useState<{ [key: string]: { inbound: Train[]; outbound: Train[] } }>({
-    weekday: { inbound: [], outbound: [] },
-    saturday: { inbound: [], outbound: [] },
-    sunday: { inbound: [], outbound: [] }
-  });
-  const [alerts, setAlerts] = useState<ApiAlerts[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
-  const [scheduleLoading, setScheduleLoading] = useState(true);
-  const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const [delays, setDelays] = useState<Map<string, number>>(new Map());
-  const [predictedTimes, setPredictedTimes] = useState<Map<string, { 
-    scheduled?: string; 
-    predicted?: string; 
-    stop_id: string;
-  }>>(new Map());
-  const [tripIdMap, setTripIdMap] = useState<Map<string, string>>(new Map());
-  const [crowdingData, setCrowdingData] = useState<Map<string, CrowdingLevel>>(new Map());
-  const [estimatedTimes, setEstimatedTimes] = useState<Map<string, {
-    scheduled_departure: string | null;
-    predicted_departure: string | null;
-    scheduled_arrival: string | null;
-    predicted_arrival: string | null;
-  }>>(new Map());
   const [showDelayDebug, setShowDelayDebug] = useState(false);
-  
+
   // Phase 2: Multi-Station State
   // Get default station: first highlighted station, or fallback to first station with gtfsId
   const getDefaultStation = (): Station => {
@@ -80,521 +55,25 @@ export default function Schedule() {
     terminal: selectedStation.terminal 
   });
 
-  const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
-  const lastFetchMinuteRef = useRef<number | null>(null);
-  const isFetchingCrowdingRef = useRef<boolean>(false);
-
-  // Initialize day type based on current service day
-  useEffect(() => {
-    const chicagoTime = getChicagoTime();
-    const serviceDayType = getServiceDayType(chicagoTime);
-    const currentMinutes = getCurrentMinutesInChicago();
-    console.debug(`[Schedule] Initializing: Chicago time: ${chicagoTime.toLocaleString()}, serviceDayType: ${serviceDayType}, currentMinutes: ${currentMinutes} (${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')})`);
-    setDayType(serviceDayType);
-  }, []);
-
-  // Update current time every 15 seconds
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = getChicagoTime();
-      setCurrentTime(now);
-      
-      const currentServiceDay = getServiceDayType(now);
-      const currentMinutes = getCurrentMinutesInChicago();
-      setDayType(prev => {
-        if (prev !== currentServiceDay) {
-          console.debug(`[Schedule] Day type changed: ${prev} -> ${currentServiceDay} at ${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')}`);
-          return currentServiceDay;
-        }
-        return prev;
-      });
-    }, 15000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Memoize currentMinutes to only change when the minute value changes
-  // This prevents unnecessary re-renders when seconds change but minute stays the same
-  // Extract hour:minute from currentTime in Chicago timezone as the dependency key
-  const currentMinutesKey = useMemo(() => {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Chicago',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false
-    }).format(currentTime);
-  }, [currentTime]);
-
-  const currentMinutes = useMemo(() => {
-    return getCurrentMinutesInChicago();
-  }, [currentMinutesKey]);
-
-  // Fetch schedule data from GTFS API
-  useEffect(() => {
-    setScheduleLoading(true);
-    setScheduleError(null);
-    
-    const terminalId = selectedStation.terminal || 'OTC';
-    
-    fetch(`/api/schedule?station=${selectedGtfsId}&terminal=${terminalId}`)
-      .then(res => {
-        if (!res.ok) {
-          if (res.status === 503) {
-            console.log('Database not available, using fallback schedule');
-            return null;
-          }
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data: { weekday?: ApiSchedule; saturday?: ApiSchedule; sunday?: ApiSchedule } | null) => {
-        if (data) {
-          const newTripIdMap = new Map<string, string>();
-          
-          const transformed: { [key: string]: { inbound: Train[]; outbound: Train[] } } = {
-            weekday: {
-              inbound: (data.weekday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.weekday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
-            },
-            saturday: {
-              inbound: (data.saturday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.saturday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
-            },
-            sunday: {
-              inbound: (data.sunday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.sunday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
-            }
-          };
-          setScheduleData(transformed);
-          setTripIdMap(newTripIdMap);
-        } else {
-          const fallback = require('@/lib/scheduleData').scheduleData;
-          setScheduleData(fallback);
-        }
-        setScheduleLoading(false);
-      })
-      .catch(error => {
-        setScheduleLoading(false);
-      });
-  }, [selectedGtfsId]); // Refresh when station changes
-
-  // Fetch alerts from Metra API
-  useEffect(() => {
-    fetch('/api/alerts')
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data: ApiAlerts[]) => {
-        const currentLine = selectedStation.line || 'UP-NW';
-        const lineAlerts = data.filter(alert => {
-          const routeIds = alert.alert?.informedEntity?.map(e => e.routeId) || [];
-          return routeIds.includes(currentLine) || routeIds.length === 0;
-        });
-        setAlerts(lineAlerts);
-      })
-      .catch(error => {
-        console.debug('Could not fetch alerts:', error.message);
-      });
-  }, [selectedStation.line]);
-
-  // Fetch delays from API
-  useEffect(() => {
-    const fetchDelays = () => {
-      fetch('/api/delays')
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
-          return res.json();
-        })
-        .then((data: { delays: Array<{ 
-          trip_id: string; 
-          stop_id: string; 
-          delay_seconds: number;
-          scheduled_arrival?: string | null;
-          scheduled_departure?: string | null;
-          predicted_arrival?: string | null;
-          predicted_departure?: string | null;
-        }> }) => {
-          const delayMap = new Map<string, number>();
-          const predictedMap = new Map<string, { scheduled?: string; predicted?: string; stop_id: string }>();
-          
-          data.delays.forEach(delay => {
-            const terminalId = selectedStation.terminal || 'OTC';
-            const destinationStopId = direction === 'inbound' ? terminalId : selectedGtfsId;
-            const originStopId = direction === 'inbound' ? selectedGtfsId : terminalId;
-            
-            if (delay.stop_id === destinationStopId) {
-              const existingDelay = delayMap.get(delay.trip_id) || 0;
-              delayMap.set(delay.trip_id, Math.max(existingDelay, delay.delay_seconds));
-              
-              if (delay.scheduled_arrival && delay.predicted_arrival) {
-                predictedMap.set(`${delay.trip_id}_arrival`, {
-                  scheduled: delay.scheduled_arrival,
-                  predicted: delay.predicted_arrival,
-                  stop_id: delay.stop_id
-                });
-              }
-            }
-            
-            if (delay.stop_id === originStopId) {
-              if (delay.scheduled_departure && delay.predicted_departure) {
-                predictedMap.set(`${delay.trip_id}_departure`, {
-                  scheduled: delay.scheduled_departure,
-                  predicted: delay.predicted_departure,
-                  stop_id: delay.stop_id
-                });
-              }
-            }
-          });
-          
-          setDelays(delayMap);
-          setPredictedTimes(predictedMap);
-          setLastUpdate(new Date().toISOString());
-        })
-        .catch(error => {
-          console.debug('Could not fetch delays:', error.message);
-        });
-    };
-    
-    fetchDelays();
-    
-    const now = new Date();
-    const msToNextSync = 30000 - (now.getTime() % 30000);
-    
-    let interval: NodeJS.Timeout;
-    const timeout = setTimeout(() => {
-      fetchDelays();
-      interval = setInterval(fetchDelays, 30000);
-    }, msToNextSync);
-    
-    return () => {
-      clearTimeout(timeout);
-      if (interval) clearInterval(interval);
-    };
-  }, [direction, selectedGtfsId]);
-
-  // Fetch crowding data (uses DB cache via backend, persists to localStorage for instant display)
-  useEffect(() => {
-    // Load from localStorage first (instant display of DB values from last session)
-    const reloadFromStorage = () => {
-      try {
-        const saved = localStorage.getItem(`crowding_${selectedGtfsId}`);
-        if (saved) {
-          const parsed = JSON.parse(saved) as Record<string, CrowdingLevel>;
-          const loaded = new Map(Object.entries(parsed));
-          setCrowdingData(loaded);
-          console.debug(`[CROWDING] Loaded ${loaded.size} entries from localStorage (DB values from last session) for ${selectedStation.name}`);
-        } else {
-          console.debug(`[CROWDING] No localStorage data for ${selectedStation.name}, will load from DB via API`);
-        }
-      } catch (error) {
-        console.debug('Could not load crowding data from localStorage:', error);
-      }
-    };
-
-    const fetchCrowding = (forceRefresh = false) => {
-      if (isFetchingCrowdingRef.current && !forceRefresh) {
-        return;
-      }
-
-      isFetchingCrowdingRef.current = true;
-
-      console.debug(
-        `Crowding: fetching data${forceRefresh ? ' (forced refresh)' : ''} at ${new Date().toLocaleTimeString()}`
-      );
-
-      const forceParam = forceRefresh ? '&force=true' : '';
-      const terminalId = selectedStation.terminal || 'OTC';
-      const lineId = selectedStation.line || 'UP-NW';
-      
-      const stationToTerminal = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=${terminalId}&line=${lineId}${forceParam}`)
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
-          return res.json();
-        })
-        .catch(error => {
-          console.debug(`Could not fetch crowding data (${selectedGtfsId}->${terminalId}):`, error.message);
-          return null;
-        });
-      
-      const terminalToStation = fetch(`/api/crowding?origin=${terminalId}&destination=${selectedGtfsId}&line=${lineId}${forceParam}`)
-        .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
-          return res.json();
-        })
-        .catch(error => {
-          console.debug(`Could not fetch crowding data (${terminalId}->${selectedGtfsId}):`, error.message);
-          return null;
-        });
-      
-      Promise.all([stationToTerminal, terminalToStation])
-        .then(([stationData, terminalData]) => {
-          // If both failed, don't update anything to preserve stale (but visible) data
-          if (!stationData && !terminalData) {
-            console.debug('Both crowding requests failed, preserving partial data');
-            return;
-          }
-
-          const crowdingMap = new Map<string, CrowdingLevel>();
-          const estimatedMap = new Map<string, {
-            scheduled_departure: string | null;
-            predicted_departure: string | null;
-            scheduled_arrival: string | null;
-            predicted_arrival: string | null;
-          }>();
-
-          // Helper to process data if it exists
-          const processData = (data: any) => {
-            if (!data?.crowding) return;
-            
-            data.crowding.forEach((item: { 
-              trip_id: string; 
-              crowding: CrowdingLevel;
-              scheduled_departure?: string | null;
-              predicted_departure?: string | null;
-              scheduled_arrival?: string | null;
-              predicted_arrival?: string | null;
-            }) => {
-              const match = item.trip_id.match(TRIP_ID_REGEX);
-              if (match) {
-                const trainNumber = match[1];
-                crowdingMap.set(trainNumber, item.crowding);
-                crowdingMap.set(item.trip_id, item.crowding);
-                
-                // Store estimated times
-                if (item.predicted_departure || item.predicted_arrival) {
-                  estimatedMap.set(trainNumber, {
-                    scheduled_departure: item.scheduled_departure || null,
-                    predicted_departure: item.predicted_departure || null,
-                    scheduled_arrival: item.scheduled_arrival || null,
-                    predicted_arrival: item.predicted_arrival || null
-                  });
-                }
-              }
-            });
-          };
-
-          processData(stationData);
-          processData(terminalData);
-          
-          // Smart merge strategy: preserve existing data for failed directions
-          setCrowdingData(prev => {
-             // If both succeeded, replace entirely with fresh data
-             if (stationData && terminalData) {
-               console.debug('Crowding: both directions succeeded, replacing all data');
-               // Save to localStorage for instant display on next page load
-               try {
-                 const toSave = Object.fromEntries(crowdingMap);
-                 localStorage.setItem(`crowding_${selectedGtfsId}`, JSON.stringify(toSave));
-               } catch (error) {
-                 console.debug('Could not save crowding data to localStorage:', error);
-               }
-               return crowdingMap;
-             }
-             
-             // If partial success, merge new data with existing data
-             // This prevents losing data from the direction that failed
-             const merged = new Map(prev);
-             
-             // Add/update entries from successful direction(s)
-             crowdingMap.forEach((value, key) => {
-               merged.set(key, value);
-             });
-             
-             if (!stationData) {
-               console.debug('Crowding: station->terminal failed, preserving existing outbound data');
-             }
-             if (!terminalData) {
-               console.debug('Crowding: terminal->station failed, preserving existing inbound data');
-             }
-             
-             // Save merged data to localStorage
-             try {
-               const toSave = Object.fromEntries(merged);
-               localStorage.setItem(`crowding_${selectedGtfsId}`, JSON.stringify(toSave));
-             } catch (error) {
-               console.debug('Could not save crowding data to localStorage:', error);
-             }
-             
-             return merged;
-          });
-          
-          setEstimatedTimes(prev => {
-             // If both succeeded, replace entirely with fresh data
-             if (stationData && terminalData) {
-               return estimatedMap;
-             }
-             
-             // If partial success, merge new data with existing data
-             const merged = new Map(prev);
-             
-             // Add/update entries from successful direction(s)
-             estimatedMap.forEach((value, key) => {
-               merged.set(key, value);
-             });
-             
-             return merged;
-          });
-
-          
-
-
-          const stationDirection = `${selectedStation.name}->${terminalId === 'OTC' ? 'Chicago OTC' : 'Chicago CUS'}`;
-          const terminalDirection = `${terminalId === 'OTC' ? 'Chicago OTC' : 'Chicago CUS'}->${selectedStation.name}`;
-          
-          console.debug(
-            `Crowding: ${stationData && terminalData ? 'Both directions' : 'Partial'} update - ` +
-            `${crowdingMap.size} train entries, ${estimatedMap.size} with estimated times | ` +
-            `${stationDirection}: ${stationData?.crowding?.length || 0} trains ${stationData ? '✓' : '✗'} | ` +
-            `${terminalDirection}: ${terminalData?.crowding?.length || 0} trains ${terminalData ? '✓' : '✗'}`
-          );
-        })
-        .catch(error => {
-          console.debug('Could not fetch crowding data:', error.message);
-        })
-        .finally(() => {
-          isFetchingCrowdingRef.current = false;
-        });
-    };
-    
-    fetchCrowdingRef.current = fetchCrowding;
-    
-    // Load from localStorage first (instant display of DB values from last session)
-    reloadFromStorage();
-    
-    // Then fetch from API (which uses DB cache - seamless update if new data available)
-    fetchCrowding();
-    
-    // Visibility-based polling - stop when tab is hidden, resume when visible
-    let interval: NodeJS.Timeout | null = null;
-    let timeout: NodeJS.Timeout | null = null;
-    
-    const startPolling = () => {
-      if (interval) return; // Already polling
-      
-      const now = new Date();
-      const msToNextSync = 60000 - (now.getTime() % 60000); // Poll every 60 sec instead of 30
-      
-      timeout = setTimeout(() => {
-        fetchCrowding(false);
-        interval = setInterval(() => fetchCrowding(false), 60000);
-      }, msToNextSync);
-    };
-    
-    const stopPolling = () => {
-      if (timeout) {
-        clearTimeout(timeout);
-        timeout = null;
-      }
-      if (interval) {
-        clearInterval(interval);
-        interval = null;
-      }
-    };
-    
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        stopPolling();
-        console.debug('Tab hidden - polling paused');
-      } else {
-        fetchCrowding(true); // Refresh data immediately when tab becomes visible
-        startPolling();
-        console.debug('Tab visible - polling resumed');
-      }
-    };
-    
-    // Start polling initially (tab is visible)
-    startPolling();
-    
-    // Listen for visibility changes
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      stopPolling();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      fetchCrowdingRef.current = null;
-    };
-  }, [selectedGtfsId, direction]);
-
-  // Fetch real-time status on mount
-  useEffect(() => {
-    fetch('/api/realtime-status')
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then(data => {
-        if (data && data.last_update) {
-          setLastUpdate(data.last_update);
-        }
-      })
-      .catch(error => {
-        console.debug('Could not fetch real-time status:', error.message);
-      });
-  }, []);
-
-  // Refresh real-time data and alerts
-  const handleRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    setRefreshError(null);
-    
-    try {
-      const [realtimeResponse, alertsResponse] = await Promise.all([
-        fetch('/api/refresh-realtime', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }),
-        fetch('/api/alerts').catch(() => ({ ok: false }))
-      ]);
-      
-      if (!realtimeResponse.ok) {
-        let errorMessage = `Server error: ${realtimeResponse.status}`;
-        try {
-          const errorData = await realtimeResponse.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch {
-          errorMessage = realtimeResponse.statusText || errorMessage;
-        }
-        throw new Error(errorMessage);
-      }
-      
-      const data = await realtimeResponse.json();
-      
-      if (data && data.timestamp) {
-        setLastUpdate(data.timestamp);
-      }
-      
-      if (alertsResponse.ok && 'json' in alertsResponse) {
-        const alertData: ApiAlerts[] = await alertsResponse.json();
-        const currentLine = selectedStation.line || 'UP-NW';
-        const lineAlerts = alertData.filter(alert => {
-          const routeIds = alert.alert?.informedEntity?.map(e => e.routeId) || [];
-          return routeIds.includes(currentLine) || routeIds.length === 0;
-        });
-        setAlerts(lineAlerts);
-      }
-      
-      if (fetchCrowdingRef.current) {
-        fetchCrowdingRef.current(true);
-      }
-      
-      setTimeout(() => {
-        setIsRefreshing(false);
-      }, 500);
-    } catch (error: any) {
-      setRefreshError(error.message || 'Failed to refresh. Make sure backend is running.');
-      setIsRefreshing(false);
-    }
-  }, []);
+  const {
+      currentTime,
+      currentMinutes,
+      dayType,
+      scheduleData,
+      scheduleLoading,
+      scheduleError,
+      tripIdMap,
+      alerts,
+      delays,
+      predictedTimes,
+      crowdingData,
+      estimatedTimes,
+      lastUpdate,
+      refreshError,
+      isRefreshing,
+      refreshAll: handleRefresh,
+      manualRefresh
+  } = useScheduleData(selectedGtfsId, selectedStation, direction);
 
   // Find next train based on current view mode
   // Uses estimated departure time when available to prevent skipping delayed trains
@@ -602,6 +81,7 @@ export default function Schedule() {
   const computedNextTrain = useMemo(() => {
     const currentMinutes = getCurrentMinutesInChicago();
     const currentSchedule = scheduleData[dayType];
+    if (!currentSchedule) return null;
     const trains = direction === 'inbound' ? currentSchedule.inbound : currentSchedule.outbound;
     
     // DEBUG: Log current state
@@ -748,6 +228,7 @@ export default function Schedule() {
 
   // Memoize current trains list
   const currentTrains = useMemo(() => {
+    if (!scheduleData[dayType]) return [];
     return direction === 'inbound' 
       ? scheduleData[dayType].inbound 
       : scheduleData[dayType].outbound;
@@ -757,81 +238,10 @@ export default function Schedule() {
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-white">
       <main className="container py-6 md:py-8 max-w-5xl mx-auto px-2 sm:px-4">
         {/* Modern Alerts Display */}
-        {activeAlerts.length > 0 && (
-          <div className="mb-4 md:mb-6 space-y-2">
-            {activeAlerts.map((alert) => {
-                const headerText = alert.alert?.headerText?.translation?.[0]?.text || 'Service Alert';
-                const descriptionText = alert.alert?.descriptionText?.translation?.[0]?.text || '';
-                
-                const isCritical = /delay|late|cancel|disrupt|mechanical|problem/i.test(headerText + descriptionText);
-                const isWarning = /schedule|change|update|notice/i.test(headerText + descriptionText);
-                
-                const alertType = isCritical ? 'critical' : isWarning ? 'warning' : 'info';
-                
-                const alertStyles = {
-                  critical: {
-                    bg: 'bg-red-50 dark:bg-red-950/20',
-                    border: 'border-red-500',
-                    icon: 'text-red-600 dark:text-red-400',
-                    title: 'text-red-900 dark:text-red-100',
-                    text: 'text-red-800 dark:text-red-200',
-                    iconComponent: AlertCircle
-                  },
-                  warning: {
-                    bg: 'bg-amber-50 dark:bg-amber-950/20',
-                    border: 'border-amber-500',
-                    icon: 'text-amber-600 dark:text-amber-400',
-                    title: 'text-amber-900 dark:text-amber-100',
-                    text: 'text-amber-800 dark:text-amber-200',
-                    iconComponent: AlertTriangle
-                  },
-                  info: {
-                    bg: 'bg-blue-50 dark:bg-blue-950/20',
-                    border: 'border-blue-500',
-                    icon: 'text-blue-600 dark:text-blue-400',
-                    title: 'text-blue-900 dark:text-blue-100',
-                    text: 'text-blue-800 dark:text-blue-200',
-                    iconComponent: Info
-                  }
-                };
-                
-                const style = alertStyles[alertType];
-                const IconComponent = style.iconComponent;
-                
-                return (
-                  <div
-                    key={alert.id}
-                    className={cn(
-                      "flex items-start gap-2.5 px-3 py-2.5 rounded-lg border",
-                      style.bg,
-                      style.border.replace('border-', 'border-l-2 border-')
-                    )}
-                  >
-                    <IconComponent className={cn("w-4 h-4 flex-shrink-0 mt-0.5", style.icon)} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className={cn("font-medium text-sm leading-snug", style.title)}>
-                          {headerText}
-                        </h3>
-                        <button
-                          onClick={() => setDismissedAlerts(prev => new Set(prev).add(alert.id))}
-                          className="flex-shrink-0 p-0.5 rounded hover:bg-black/5"
-                          aria-label="Dismiss alert"
-                        >
-                          <X className="w-3.5 h-3.5 text-zinc-400" />
-                        </button>
-                      </div>
-                      {descriptionText && (
-                        <p className={cn("text-xs leading-relaxed mt-1 opacity-80", style.text)}>
-                          {descriptionText}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        )}
+        <ScheduleAlerts 
+          alerts={activeAlerts} 
+          onDismiss={(id: string) => setDismissedAlerts(prev => new Set(prev).add(id))} 
+        />
 
         {/* Schedule Loading/Error State */}
         {scheduleLoading && (
@@ -848,50 +258,13 @@ export default function Schedule() {
         )}
 
         {/* Header Bar - Consistent with Dashboard */}
-        <div className="mb-4">
-          {/* Main Row: Direction + Branding + Time */}
-          <div className="flex items-center justify-between gap-2">
-            
-            {/* Left: Direction Switcher - Matches card style */}
-            <button
-              onClick={() => setDirection(direction === 'inbound' ? 'outbound' : 'inbound')}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all",
-                "border shadow-sm bg-white",
-                direction === 'inbound' 
-                  ? "border-blue-200 text-blue-700 hover:bg-blue-50" 
-                  : "border-amber-200 text-amber-700 hover:bg-amber-50"
-              )}
-            >
-              <ArrowLeftRight className="w-3 h-3" />
-              <span className="font-bold">{direction === 'inbound' ? 'Inbound' : 'Outbound'}</span>
-              <ArrowRight className="w-3 h-3 opacity-50" />
-              <span>{direction === 'inbound' ? 'Chicago' : 'Suburbs'}</span>
-            </button>
-
-            {/* Center: Branding - Station Selector */}
-            <div className="flex-1 text-center py-1 flex items-center justify-center">
-              <StationSelector 
-                selectedGtfsId={selectedGtfsId} 
-                onStationChange={setSelectedGtfsId} 
-              />
-            </div>
-
-            {/* Right: Live Sync Status - Matches card style */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-zinc-200 shadow-sm text-zinc-600">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
-              </span>
-              <span className="text-xs font-medium font-mono">
-                {lastUpdate ? (() => {
-                  const date = lastUpdate.includes('T') ? new Date(lastUpdate) : new Date(lastUpdate.replace(' ', 'T') + 'Z');
-                  return formatChicagoTime(date, { hour: 'numeric', minute: '2-digit' });
-                })() : '...'}
-              </span>
-            </div>
-          </div>
-        </div>
+        <ScheduleHeader 
+          direction={direction}
+          setDirection={setDirection}
+          selectedGtfsId={selectedGtfsId}
+          setSelectedGtfsId={setSelectedGtfsId}
+          lastUpdate={lastUpdate}
+        />
 
         {refreshError && (
           <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs">
