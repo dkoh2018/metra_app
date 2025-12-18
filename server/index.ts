@@ -734,17 +734,14 @@ async function startServer() {
             
             let firstTrainTimestamp: number;
 
-            try {
+              // Fix for Railway/UTC servers: Use "Now - 1 Hour" logic
+              // 1. Solves Timezone Bug: Date.now() is universal, so subtracting 1 hour always gives "1 hour ago" in absolute time, matching Chicago time correctly.
+              // 2. Optimization: Fetches only relevant/active trains instead of the entire day history, preventing timeouts and null data.
               const now = new Date();
-              const chicagoNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-
-              chicagoNow.setHours(3, 0, 0, 0);
-
-              firstTrainTimestamp = Math.floor(chicagoNow.getTime() / 1000);
-            } catch (dbError) {
-              const now = new Date();
-              firstTrainTimestamp = Math.floor(now.getTime() / 1000);
-            }
+              firstTrainTimestamp = Math.floor(now.getTime() / 1000) - 3600;
+              
+              const chicagoTime = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
+              console.log(`[CROWDING] Start Time: ${firstTrainTimestamp} (Now - 1h). Server Now (Chicago): ${chicagoTime}`);
             
 
             
