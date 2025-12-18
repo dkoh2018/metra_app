@@ -9,8 +9,9 @@ WORKDIR /app
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Copy package files first (for better caching)
+# Copy package files and patches (needed for pnpm install)
 COPY package.json pnpm-lock.yaml ./
+COPY patches ./patches/
 
 # Change ownership to pptruser for the app directory
 RUN chown -R pptruser:pptruser /app
