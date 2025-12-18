@@ -1213,7 +1213,12 @@ export default function Schedule() {
                       
                       const depMins = parseTime(scrapedEstimate.predicted_departure);
                       const arrMins = parseTime(scrapedEstimate.predicted_arrival);
-                      const estimatedDuration = arrMins - depMins;
+                      let estimatedDuration = arrMins - depMins;
+                      
+                      // Handle overnight trains (e.g. 11 PM to 12 AM)
+                      if (estimatedDuration < 0) {
+                        estimatedDuration += 24 * 60;
+                      }
                       
                       if (estimatedDuration > 0) {
                         return <span>{estimatedDuration} min trip</span>;
@@ -1663,7 +1668,12 @@ const ScheduleTable = memo(function ScheduleTable({
                     
                     const depMins = parseTime(scrapedEstimate.predicted_departure);
                     const arrMins = parseTime(scrapedEstimate.predicted_arrival);
-                    const estimatedDur = arrMins - depMins;
+                    let estimatedDur = arrMins - depMins;
+                    
+                    // Handle overnight trains (e.g. 11 PM to 12 AM)
+                    if (estimatedDur < 0) {
+                      estimatedDur += 24 * 60;
+                    }
                     
                     if (estimatedDur > 0 && estimatedDur !== duration) {
                       return <span>{estimatedDur}m</span>;
