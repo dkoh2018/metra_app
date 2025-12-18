@@ -248,8 +248,22 @@ async function startServer() {
     app.get("/api/alerts", (_req, res) => fetchData("alerts", res));
 
     // UP-NW specific train positions for the map
+    // Cache positions to prevent hitting Metra rate limits with multiple users
+    let positionsCache: {
+      data: any;
+      timestamp: number;
+    } | null = null;
+    const POSITIONS_CACHE_TTL = 10 * 1000; // 10 seconds for real-time feel
+
     app.get("/api/positions/upnw", async (req, res) => {
       try {
+        const now = Date.now();
+        
+        // Serve from cache if fresh
+        if (positionsCache && (now - positionsCache.timestamp < POSITIONS_CACHE_TTL)) {
+          return res.json(positionsCache.data);
+        }
+
         const axios = (await import("axios")).default;
         const GtfsRealtimeBindings = (await import("gtfs-realtime-bindings")).default;
 
@@ -290,6 +304,18 @@ async function startServer() {
             };
           });
         
+        const responseData = {
+          trains: upnwTrains,
+          timestamp: new Date().toISOString(),
+          count: upnwTrains.length
+        };
+
+        // Update cache
+        positionsCache = {
+          data: responseData,
+          timestamp: now
+        };
+        
         // Save to database if available and save param is set
         const shouldSave = req.query.save === 'true';
         if (shouldSave && getDatabase) {
@@ -318,11 +344,7 @@ async function startServer() {
           }
         }
         
-        res.json({
-          trains: upnwTrains,
-          timestamp: new Date().toISOString(),
-          count: upnwTrains.length
-        });
+        res.json(responseData);
       } catch (error: any) {
         console.error("Error fetching UP-NW positions:", error.message);
         res.status(500).json({ error: "Failed to fetch UP-NW positions" });
