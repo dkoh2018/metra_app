@@ -30,8 +30,8 @@ RUN pnpm run build
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# Let Puppeteer auto-detect Chrome path in its cache
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
 
 # Expose the port
 EXPOSE 3001

@@ -43,17 +43,31 @@ async function ensureChromeExecutable(): Promise<string | null> {
   }
 
   chromeInstallPromise = (async () => {
-    // Try system Chrome paths first (faster and more reliable)
+    // First, try Puppeteer's built-in Chrome detection (works in Docker)
+    try {
+      const puppeteer = (await import("puppeteer")).default;
+      const puppeteerPath = puppeteer.executablePath();
+      if (puppeteerPath && fs.existsSync(puppeteerPath)) {
+        console.log(`✅ Using Puppeteer's bundled Chrome at: ${puppeteerPath}`);
+        chromeExecutablePath = puppeteerPath;
+        chromeAvailable = true;
+        return puppeteerPath;
+      }
+    } catch (e) {
+      // Puppeteer's executablePath() failed, try other methods
+    }
+
+    // Try system Chrome paths (for local development)
     const systemChromePaths = [
       // macOS
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       '/Applications/Chromium.app/Contents/MacOS/Chromium',
-      // Linux (including Render.com)
+      // Linux
       '/usr/bin/google-chrome',
       '/usr/bin/google-chrome-stable',
       '/usr/bin/chromium',
       '/usr/bin/chromium-browser',
-      // Render.com specific
+      // Environment variable override
       process.env.PUPPETEER_EXECUTABLE_PATH,
     ].filter(Boolean) as string[];
 
@@ -67,7 +81,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
     }
 
     // Fall back to downloading Chrome via @puppeteer/browsers
-    console.log("No system Chrome found, attempting to download...");
+    console.log("No Chrome found, attempting to download...");
     const cacheDir = path.resolve(DEFAULT_PUPPETEER_CACHE);
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
