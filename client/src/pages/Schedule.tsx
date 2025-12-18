@@ -803,6 +803,15 @@ export default function Schedule() {
       // Regular time (00:XX to 23:XX)
       let trainMinutes = hours * 60 + minutes;
       
+      // Special handling for early morning (before 1 AM)
+      // At 12:13 AM, trains from 1 AM onwards are TODAY's trains, not tomorrow's
+      const SERVICE_DAY_START = 60; // 1:00 AM
+      if (currentMinutesValue < SERVICE_DAY_START) {
+        // We're in early morning (00:00 - 00:59)
+        // All trains from current time onwards are today, no day offset needed
+        return trainMinutes;
+      }
+      
       // If viewing late at night (after 6 PM) and train is early morning (00:XX to 04:XX)
       // Treat it as "tomorrow" (add 24 hours)
       const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM
@@ -1574,11 +1583,6 @@ const ScheduleTable = memo(function ScheduleTable({
   const hasDeparted = (departureTime: string, currentMinutesValue: number): boolean => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
     
-    // DEBUG: Log the first few calls to understand what's happening
-    if (Math.random() < 0.01) { // Log 1% of calls to avoid spam
-      console.debug(`[hasDeparted] Checking: ${departureTime} (${depHours}:${depMinutes}) vs current: ${currentMinutesValue} (${Math.floor(currentMinutesValue/60)}:${currentMinutesValue%60})`);
-    }
-    
     // Service day boundary: 1 AM (60 minutes into the day)
     // Trains with departure times from 24:00-25:59 in GTFS are overnight trains
     const SERVICE_DAY_START = 60; // 1:00 AM
@@ -1587,6 +1591,11 @@ const ScheduleTable = memo(function ScheduleTable({
     
     const isBeforeServiceDayStart = currentMinutesValue < SERVICE_DAY_START;
     const isLateNight = currentMinutesValue >= LATE_NIGHT_THRESHOLD; // After 6 PM
+    
+    // DEBUG: Log early morning trains (00:XX) to see what's happening
+    if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
+      console.debug(`[hasDeparted] Early morning train: ${departureTime} (${depHours*60 + depMinutes} min) vs current: ${currentMinutesValue} min (${Math.floor(currentMinutesValue/60)}:${String(currentMinutesValue%60).padStart(2, '0')}), isBeforeServiceDayStart: ${isBeforeServiceDayStart}`);
+    }
     
     // GTFS overnight trains (24:XX, 25:XX) are for "next day"
     if (depHours >= 24) {
@@ -1613,19 +1622,30 @@ const ScheduleTable = memo(function ScheduleTable({
     
     const depTotalMinutes = depHours * 60 + depMinutes;
     
-    // Before 1 AM: we're still on yesterday's service day
+    // Before 1 AM: we're in the early morning of the current day
+    // At 12:08 AM, trains from 1 AM onwards are TODAY's trains, not yesterday's!
     if (isBeforeServiceDayStart) {
-      // If train is between midnight and 1 AM, check if it's passed
-      if (depTotalMinutes < SERVICE_DAY_START) {
-        const result = depTotalMinutes < currentMinutesValue;
+      // If train is between midnight and current time, it's departed
+      if (depTotalMinutes < currentMinutesValue) {
+        const result = true;
         if (Math.random() < 0.01) {
-          console.debug(`[hasDeparted] Before service day start: ${departureTime} (${depTotalMinutes}) vs ${currentMinutesValue}: ${result ? 'DEPARTED' : 'UPCOMING'}`);
+          console.debug(`[hasDeparted] Before service day start: ${departureTime} (${depTotalMinutes}) < ${currentMinutesValue}: DEPARTED`);
         }
         return result;
       }
-      // Trains after 1 AM are all departed (from yesterday)
+      // All other trains (current time onwards, including 1 AM+) are upcoming
       if (Math.random() < 0.01) {
-        console.debug(`[hasDeparted] Before service day start, train after 1 AM (${departureTime}): DEPARTED (yesterday's train)`);
+        console.debug(`[hasDeparted] Before service day start, train ${departureTime} (${depTotalMinutes}) >= ${currentMinutesValue}: UPCOMING (today's train)`);
+      }
+      return false;
+    }
+    
+    // After 1 AM: handle early morning trains (00:XX) correctly
+    // At 4:42 AM, a 12:12 AM train (12 min) is from today and already departed
+    if (!isBeforeServiceDayStart && depTotalMinutes < SERVICE_DAY_START) {
+      // We're past 1 AM, checking a train before 1 AM - it's from today and already departed
+      if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
+        console.debug(`[hasDeparted] After service day start, checking early train: ${departureTime} (${depTotalMinutes}) < ${SERVICE_DAY_START} < ${currentMinutesValue}: DEPARTED ✓`);
       }
       return true;
     }
@@ -1642,7 +1662,7 @@ const ScheduleTable = memo(function ScheduleTable({
     
     // Regular comparison: departed if train time is before current time
     const result = depTotalMinutes < currentMinutesValue;
-    if (Math.random() < 0.01) {
+    if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
       console.debug(`[hasDeparted] Regular comparison: ${departureTime} (${depTotalMinutes}) vs ${currentMinutesValue}: ${result ? 'DEPARTED' : 'UPCOMING'}`);
     }
     return result;
