@@ -731,6 +731,10 @@ async function startServer() {
               
               // First: Extract crowding from .trip-row elements
               const tripRows = Array.from(document.querySelectorAll('.trip-row'));
+              if (tripRows.length > 0) {
+                 debug.push(`First Row HTML: ${tripRows[0].outerHTML.substring(0, 500)}...`);
+              }
+              
               tripRows.forEach((tripCell: Element) => {
                 const tripId = tripCell.getAttribute('id');
                 if (!tripId) return;
@@ -761,20 +765,21 @@ async function startServer() {
                 });
               });
               
-              // Second: Extract estimated times from td.stop.has-exception elements
+              // Second: Extract estimated times from ALL td.stop elements (don't rely on has-exception class)
               // These have IDs like "UP-NW_UNW672_V3_APALATINE" (trip_id + "_" + stop)
-              const estimatedStops = Array.from(document.querySelectorAll('td.stop.has-exception'));
-              debug.push(`Found ${estimatedStops.length} estimated stop cells`);
+              const estimatedStops = Array.from(document.querySelectorAll('td.stop'));
+              debug.push(`Found ${estimatedStops.length} total stop cells`);
               
               estimatedStops.forEach((cell: Element, index: number) => {
-                if (index < 2) debug.push(`Cell ${index} HTML sample: ${cell.outerHTML.substring(0, 150)}...`);
-                
-                // Check if this cell has estimated time indicator
-                if (!cell.querySelector('.stop--exception-estimated')) {
-                    if (index < 2) debug.push(`Cell ${index} skipped: missing .stop--exception-estimated`);
-                    return;
-                }
-                
+                // Check if this cell has a strike-through time (indicating delay/change)
+                // We access the text container first
+                const stopText = cell.querySelector('.stop--text');
+                if (!stopText) return;
+
+                const strikeOut = stopText.querySelector('.strike-out');
+                // If there's no strike-out, there's no estimated time update to process
+                if (!strikeOut) return;
+
                 const cellId = cell.getAttribute('id');
                 if (!cellId) return;
                 
@@ -791,11 +796,7 @@ async function startServer() {
                 const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
                 
                 // Get the estimated time from the cell
-                const stopText = cell.querySelector('.stop--text');
-                if (!stopText) return;
-                
-                const strikeOut = stopText.querySelector('.strike-out');
-                if (!strikeOut) return; // No strikeout means no estimate
+                // We already have stopText and strikeOut from above
                 
                 const scheduledTime = strikeOut.textContent?.trim() || null;
                 // Estimated time is the text after the strikeout
