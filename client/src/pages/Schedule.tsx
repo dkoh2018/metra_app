@@ -192,6 +192,12 @@ export default function Schedule() {
   }>>(new Map());
   const [tripIdMap, setTripIdMap] = useState<Map<string, string>>(new Map());
   const [crowdingData, setCrowdingData] = useState<Map<string, CrowdingLevel>>(new Map());
+  const [estimatedTimes, setEstimatedTimes] = useState<Map<string, {
+    scheduled_departure: string | null;
+    predicted_departure: string | null;
+    scheduled_arrival: string | null;
+    predicted_arrival: string | null;
+  }>>(new Map());
   const [showDelayDebug, setShowDelayDebug] = useState(false);
   const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
   const lastFetchMinuteRef = useRef<number | null>(null);
@@ -408,17 +414,47 @@ export default function Schedule() {
       Promise.all([palatineToChicago, chicagoToPalatine])
         .then(([palatineData, chicagoData]) => {
           const crowdingMap = new Map<string, CrowdingLevel>();
+          const estimatedMap = new Map<string, {
+            scheduled_departure: string | null;
+            predicted_departure: string | null;
+            scheduled_arrival: string | null;
+            predicted_arrival: string | null;
+          }>();
 
-          palatineData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
+          palatineData.crowding?.forEach((item: { 
+            trip_id: string; 
+            crowding: CrowdingLevel;
+            scheduled_departure?: string | null;
+            predicted_departure?: string | null;
+            scheduled_arrival?: string | null;
+            predicted_arrival?: string | null;
+          }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
               const trainNumber = match[1];
               crowdingMap.set(trainNumber, item.crowding);
               crowdingMap.set(item.trip_id, item.crowding);
+              
+              // Store estimated times
+              if (item.predicted_departure || item.predicted_arrival) {
+                estimatedMap.set(trainNumber, {
+                  scheduled_departure: item.scheduled_departure || null,
+                  predicted_departure: item.predicted_departure || null,
+                  scheduled_arrival: item.scheduled_arrival || null,
+                  predicted_arrival: item.predicted_arrival || null
+                });
+              }
             }
           });
 
-          chicagoData.crowding?.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
+          chicagoData.crowding?.forEach((item: { 
+            trip_id: string; 
+            crowding: CrowdingLevel;
+            scheduled_departure?: string | null;
+            predicted_departure?: string | null;
+            scheduled_arrival?: string | null;
+            predicted_arrival?: string | null;
+          }) => {
             const match = item.trip_id.match(TRIP_ID_REGEX);
             if (match) {
               const trainNumber = match[1];
@@ -426,13 +462,24 @@ export default function Schedule() {
                 crowdingMap.set(trainNumber, item.crowding);
                 crowdingMap.set(item.trip_id, item.crowding);
               }
+              
+              // Store estimated times if not already set
+              if (!estimatedMap.has(trainNumber) && (item.predicted_departure || item.predicted_arrival)) {
+                estimatedMap.set(trainNumber, {
+                  scheduled_departure: item.scheduled_departure || null,
+                  predicted_departure: item.predicted_departure || null,
+                  scheduled_arrival: item.scheduled_arrival || null,
+                  predicted_arrival: item.predicted_arrival || null
+                });
+              }
             }
           });
 
           setCrowdingData(crowdingMap);
+          setEstimatedTimes(estimatedMap);
 
           console.debug(
-            `Crowding: updated ${crowdingMap.size} train entries (Palatine->Chicago: ${
+            `Crowding: updated ${crowdingMap.size} train entries, ${estimatedMap.size} with estimated times (Palatine->Chicago: ${
               palatineData.crowding?.length || 0
             }, Chicago->Palatine: ${chicagoData.crowding?.length || 0})`
           );
@@ -806,6 +853,9 @@ export default function Schedule() {
           const predictedDepartureData = tripId ? predictedTimes.get(`${tripId}_departure`) : null;
           const predictedArrivalData = tripId ? predictedTimes.get(`${tripId}_arrival`) : null;
           
+          // Get scraped estimated times (from Metra website)
+          const scrapedEstimate = estimatedTimes.get(nextTrain.id);
+          
           const usePredictedDeparture =
             predictedDepartureData?.predicted &&
             isPredictedTimeReasonable(
@@ -933,16 +983,38 @@ export default function Schedule() {
                   <div className="flex items-baseline gap-2">
                     <div className={cn(
                       "text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums tracking-tight text-zinc-900",
-                      delayMinutes && delayMinutes > 0 ? "text-red-600" : ""
+                      delayMinutes && delayMinutes > 0 ? "text-red-600" : "",
+                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure > (scrapedEstimate.scheduled_departure || "") ? "text-red-700" : "",
+                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure < (scrapedEstimate.scheduled_departure || "") ? "text-green-700" : ""
                     )}>
-                      {predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture ? (
-                        <>
-                          <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{scheduledDeparture}</span>
-                          <span className="text-red-600">{predictedDeparture}</span>
-                        </>
-                      ) : (
-                        predictedDeparture || formatTime(nextTrain.departureTime)
-                      )}
+                      {(() => {
+                        // Priority 1: Use scraped estimated departure if available
+                        if (scrapedEstimate?.predicted_departure) {
+                          const sched = scrapedEstimate.scheduled_departure || formatTime(nextTrain.departureTime);
+                          const pred = scrapedEstimate.predicted_departure;
+                          const isDelayed = pred > sched;
+                          const isEarly = pred < sched;
+                          if (isDelayed || isEarly) {
+                            return (
+                              <>
+                                <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{sched}</span>
+                                <span className={isDelayed ? "text-red-700" : "text-green-700"}>{pred}</span>
+                              </>
+                            );
+                          }
+                        }
+                        // Priority 2: Use real-time API prediction
+                        if (predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture) {
+                          return (
+                            <>
+                              <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{scheduledDeparture}</span>
+                              <span className="text-red-600">{predictedDeparture}</span>
+                            </>
+                          );
+                        }
+                        // Default: show formatted departure time
+                        return predictedDeparture || formatTime(nextTrain.departureTime);
+                      })()}
                     </div>
                     <div className={cn(
                       "flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[8px] sm:text-[10px] font-bold uppercase tracking-wider rounded-full border shadow-sm",
@@ -1040,6 +1112,7 @@ export default function Schedule() {
             delays={delays}
             predictedTimes={predictedTimes}
             crowdingData={crowdingData}
+            estimatedTimes={estimatedTimes}
             calculateDuration={memoizedCalculateDuration}
             currentTime={currentTime}
             direction={direction}
@@ -1072,6 +1145,7 @@ const ScheduleTable = memo(function ScheduleTable({
   delays,
   predictedTimes,
   crowdingData,
+  estimatedTimes,
   calculateDuration,
   currentTime,
   direction,
@@ -1083,6 +1157,12 @@ const ScheduleTable = memo(function ScheduleTable({
   delays: Map<string, number>,
   predictedTimes: Map<string, { scheduled?: string; predicted?: string; stop_id: string }>,
   crowdingData: Map<string, CrowdingLevel>,
+  estimatedTimes: Map<string, {
+    scheduled_departure: string | null;
+    predicted_departure: string | null;
+    scheduled_arrival: string | null;
+    predicted_arrival: string | null;
+  }>,
   calculateDuration: (dep: string, arr: string) => number,
   currentTime: Date,
   direction: Direction,
@@ -1274,6 +1354,9 @@ const ScheduleTable = memo(function ScheduleTable({
           const predictedArrivalData = tripId ? predictedTimes.get(`${tripId}_arrival`) : null;
           const departed = hasDeparted(train.departureTime);
           
+          // Get scraped estimated times (from Metra website)
+          const scrapedEstimate = estimatedTimes.get(train.id);
+          
           const usePredictedDeparture =
             predictedDepartureData?.predicted &&
             isPredictedTimeReasonable(
@@ -1337,34 +1420,65 @@ const ScheduleTable = memo(function ScheduleTable({
                       : ""
               )}
             >
-              {/* Depart Column with crowding dot */}
+              {/* Depart Column - show estimated time if available */}
               <div className={cn(
                 "w-20 shrink-0 font-semibold tabular-nums text-sm",
                 isNext ? "text-primary" : "text-zinc-900",
                 departed && !isNext && "text-zinc-400"
               )}>
-                {isNext && predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture ? (
-                  <span className="text-red-600">{predictedDeparture}</span>
-                ) : isNext && predictedDeparture && delayMinutes && delayMinutes > 0 ? (
-                  <span className="text-red-600">{predictedDeparture}</span>
-                ) : (
-                  formatTime(train.departureTime)
-                )}
+                {(() => {
+                  // Use scraped estimated departure if available
+                  if (scrapedEstimate?.predicted_departure) {
+                    // Check if late (predicted > scheduled) or early (predicted < scheduled)
+                    const sched = scrapedEstimate.scheduled_departure || formatTime(train.departureTime);
+                    const pred = scrapedEstimate.predicted_departure;
+                    const isDelayed = pred > sched;
+                    const isEarly = pred < sched;
+                    return (
+                      <span className={isDelayed ? "text-red-700" : isEarly ? "text-green-700" : ""}>
+                        {pred}
+                      </span>
+                    );
+                  }
+                  // Fallback to real-time API prediction
+                  if (isNext && predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture) {
+                    return <span className="text-red-600">{predictedDeparture}</span>;
+                  }
+                  if (isNext && predictedDeparture && delayMinutes && delayMinutes > 0) {
+                    return <span className="text-red-600">{predictedDeparture}</span>;
+                  }
+                  return formatTime(train.departureTime);
+                })()}
               </div>
               
-              {/* Arrive Column */}
+              {/* Arrive Column - show estimated time if available */}
               <div className={cn(
                 "w-20 shrink-0 tabular-nums text-sm",
                 isNext ? "text-zinc-700" : "text-zinc-700",
                 departed && !isNext && "text-zinc-400"
               )}>
-                {isNext && predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival ? (
-                  <span className="text-red-600">{predictedArrival}</span>
-                ) : isNext && predictedArrival && delayMinutes && delayMinutes > 0 ? (
-                  <span className="text-red-600">{predictedArrival}</span>
-                ) : (
-                  formatTime(train.arrivalTime)
-                )}
+                {(() => {
+                  // Use scraped estimated arrival if available
+                  if (scrapedEstimate?.predicted_arrival) {
+                    const sched = scrapedEstimate.scheduled_arrival || formatTime(train.arrivalTime);
+                    const pred = scrapedEstimate.predicted_arrival;
+                    const isDelayed = pred > sched;
+                    const isEarly = pred < sched;
+                    return (
+                      <span className={isDelayed ? "text-red-700" : isEarly ? "text-green-700" : ""}>
+                        {pred}
+                      </span>
+                    );
+                  }
+                  // Fallback to real-time API prediction
+                  if (isNext && predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival) {
+                    return <span className="text-red-600">{predictedArrival}</span>;
+                  }
+                  if (isNext && predictedArrival && delayMinutes && delayMinutes > 0) {
+                    return <span className="text-red-600">{predictedArrival}</span>;
+                  }
+                  return formatTime(train.arrivalTime);
+                })()}
               </div>
               
               {/* Duration Column */}

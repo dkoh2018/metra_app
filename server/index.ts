@@ -532,24 +532,41 @@ async function startServer() {
         const formatCachedData = (cachedData: Array<{
           trip_id: string;
           crowding: string | null;
+          scheduled_departure?: string | null;
+          predicted_departure?: string | null;
+          scheduled_arrival?: string | null;
+          predicted_arrival?: string | null;
           updated_at: string;
         }>) => {
           const crowding = cachedData
             .filter(item => item.crowding)
-            .map(item => ({ trip_id: item.trip_id, crowding: item.crowding as CrowdingLevel }));
+            .map(item => ({ 
+              trip_id: item.trip_id, 
+              crowding: item.crowding as CrowdingLevel,
+              scheduled_departure: item.scheduled_departure || null,
+              predicted_departure: item.predicted_departure || null,
+              scheduled_arrival: item.scheduled_arrival || null,
+              predicted_arrival: item.predicted_arrival || null
+            }));
           
           return { crowding };
         };
         
         if (!forceRefresh) {
           const cachedData = db.prepare(`
-            SELECT trip_id, crowding, updated_at
+            SELECT trip_id, crowding, 
+                   scheduled_departure, predicted_departure,
+                   scheduled_arrival, predicted_arrival, updated_at
             FROM crowding_cache
             WHERE origin = ? AND destination = ?
-              AND updated_at > datetime('now', '-1 hour')
+              AND updated_at > datetime('now', '-5 minutes')
           `).all(origin, destination) as Array<{
             trip_id: string;
             crowding: string | null;
+            scheduled_departure: string | null;
+            predicted_departure: string | null;
+            scheduled_arrival: string | null;
+            predicted_arrival: string | null;
             updated_at: string;
           }>;
           
@@ -571,7 +588,9 @@ async function startServer() {
         }
         
         const staleCache = db.prepare(`
-          SELECT trip_id, crowding, updated_at
+          SELECT trip_id, crowding, 
+                 scheduled_departure, predicted_departure,
+                 scheduled_arrival, predicted_arrival, updated_at
           FROM crowding_cache
           WHERE origin = ? AND destination = ?
             AND updated_at > datetime('now', '-24 hours')
@@ -580,6 +599,10 @@ async function startServer() {
         `).all(origin, destination) as Array<{
           trip_id: string;
           crowding: string | null;
+          scheduled_departure: string | null;
+          predicted_departure: string | null;
+          scheduled_arrival: string | null;
+          predicted_arrival: string | null;
           updated_at: string;
         }>;
         
@@ -652,48 +675,99 @@ async function startServer() {
             }
             
             const extractedData = await page.evaluate(() => {
-              const trainRows = Array.from(document.querySelectorAll('.trip-row'));
-              const crowdingResults: Array<{ trip_id: string; crowding: CrowdingLevel }> = [];
+              type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
               
-              trainRows.forEach((row: Element) => {
-                const tripId = row.getAttribute('id');
+              // Map to store results by trip_id
+              const resultsMap = new Map<string, {
+                trip_id: string;
+                crowding: CrowdingLevel;
+                scheduled_departure: string | null;
+                estimated_departure: string | null;
+                scheduled_arrival: string | null;
+                estimated_arrival: string | null;
+              }>();
+              
+              // First: Extract crowding from .trip-row elements
+              const tripRows = Array.from(document.querySelectorAll('.trip-row'));
+              tripRows.forEach((tripCell: Element) => {
+                const tripId = tripCell.getAttribute('id');
                 if (!tripId) return;
                 
-                // Crowding is stored in a nested span inside .trip--crowding container
-                // Classes: trip--crowding-low, trip--crowding-some, trip--crowding-moderate, trip--crowding-high
-                const crowdingContainer = row.querySelector('.trip--crowding');
-                if (!crowdingContainer) return;
+                const crowdingContainer = tripCell.querySelector('.trip--crowding');
+                let crowding: CrowdingLevel = 'low';
                 
-                // Check for crowding classes on both the container and nested spans
-                const crowdingLow = crowdingContainer.querySelector('.trip--crowding-low') || 
-                                    crowdingContainer.classList.contains('trip--crowding-low');
-                const crowdingSome = crowdingContainer.querySelector('.trip--crowding-some') ||
-                                     crowdingContainer.classList.contains('trip--crowding-some');
-                const crowdingModerate = crowdingContainer.querySelector('.trip--crowding-moderate') ||
-                                         crowdingContainer.classList.contains('trip--crowding-moderate');
-                const crowdingHigh = crowdingContainer.querySelector('.trip--crowding-high') ||
-                                     crowdingContainer.classList.contains('trip--crowding-high');
-
-                let crowding: CrowdingLevel | null = null;
-                if (crowdingHigh) {
-                  crowding = 'high';
-                } else if (crowdingModerate) {
-                  crowding = 'moderate';
-                } else if (crowdingSome) {
-                  crowding = 'some';
-                } else if (crowdingLow) {
-                  crowding = 'low';
-                } else {
-                  // Fallback: if container exists but no specific level, assume low
-                  crowding = 'low';
+                if (crowdingContainer) {
+                  if (crowdingContainer.querySelector('.trip--crowding-high') || 
+                      crowdingContainer.classList.contains('trip--crowding-high')) {
+                    crowding = 'high';
+                  } else if (crowdingContainer.querySelector('.trip--crowding-moderate') ||
+                             crowdingContainer.classList.contains('trip--crowding-moderate')) {
+                    crowding = 'moderate';
+                  } else if (crowdingContainer.querySelector('.trip--crowding-some') ||
+                             crowdingContainer.classList.contains('trip--crowding-some')) {
+                    crowding = 'some';
+                  }
                 }
                 
-                if (crowding) {
-                  crowdingResults.push({ trip_id: tripId, crowding });
+                resultsMap.set(tripId, {
+                  trip_id: tripId,
+                  crowding,
+                  scheduled_departure: null,
+                  estimated_departure: null,
+                  scheduled_arrival: null,
+                  estimated_arrival: null
+                });
+              });
+              
+              // Second: Extract estimated times from td.stop.has-exception elements
+              // These have IDs like "UP-NW_UNW672_V3_APALATINE" (trip_id + "_" + stop)
+              const estimatedStops = Array.from(document.querySelectorAll('td.stop.has-exception'));
+              
+              estimatedStops.forEach((cell: Element) => {
+                // Check if this cell has estimated time indicator
+                if (!cell.querySelector('.stop--exception-estimated')) return;
+                
+                const cellId = cell.getAttribute('id');
+                if (!cellId) return;
+                
+                // Extract trip_id by removing the stop suffix (e.g., "_APALATINE", "_OTC", "_PALATINE")
+                // Trip IDs look like: UP-NW_UNW672_V3_A
+                // Cell IDs look like: UP-NW_UNW672_V3_APALATINE or UP-NW_UNW672_V3_AOTC
+                const tripIdMatch = cellId.match(/^(UP-NW_UNW\d+_V\d+_[A-Z])/);
+                if (!tripIdMatch) return;
+                const tripId = tripIdMatch[1];
+                
+                // Determine if this is departure (PALATINE) or arrival (OTC) based on cell ID
+                const isOriginStop = cellId.includes('PALATINE');
+                const isDestStop = cellId.includes('OTC');
+                
+                // Get the estimated time from the cell
+                const stopText = cell.querySelector('.stop--text');
+                if (!stopText) return;
+                
+                const strikeOut = stopText.querySelector('.strike-out');
+                if (!strikeOut) return; // No strikeout means no estimate
+                
+                const scheduledTime = strikeOut.textContent?.trim() || null;
+                // Estimated time is the text after the strikeout
+                const fullText = stopText.textContent || '';
+                const strikeText = strikeOut.textContent || '';
+                const estimatedTime = fullText.replace(strikeText, '').trim() || null;
+                
+                // Update the results map
+                const existing = resultsMap.get(tripId);
+                if (existing) {
+                  if (isOriginStop) {
+                    existing.scheduled_departure = scheduledTime;
+                    existing.estimated_departure = estimatedTime;
+                  } else if (isDestStop) {
+                    existing.scheduled_arrival = scheduledTime;
+                    existing.estimated_arrival = estimatedTime;
+                  }
                 }
               });
               
-              return { crowding: crowdingResults };
+              return { crowding: Array.from(resultsMap.values()) };
             });
             
             if (extractedData.crowding.length === 0) {
@@ -702,14 +776,24 @@ async function startServer() {
             
             console.log(`Extracted crowding data for ${extractedData.crowding.length} trains`);
             
+            // Count how many have estimated times
+            const withEstimates = extractedData.crowding.filter(
+              (item: any) => item.estimated_departure || item.estimated_arrival
+            ).length;
+            if (withEstimates > 0) {
+              console.log(`  └─ ${withEstimates} trains have estimated/delayed times`);
+            }
+            
             const { getDatabase: getDbForCache } = await import("./db/schema.js");
             const dbForCache = getDbForCache();
             
             try {
               const insertCache = dbForCache.prepare(`
                 INSERT OR REPLACE INTO crowding_cache 
-                (origin, destination, trip_id, crowding, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (origin, destination, trip_id, crowding, 
+                 scheduled_departure, predicted_departure, 
+                 scheduled_arrival, predicted_arrival, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
               `);
               
               const transaction = dbForCache.transaction(() => {
@@ -718,12 +802,23 @@ async function startServer() {
                   WHERE origin = ? AND destination = ? AND updated_at < datetime('now', '-24 hours')
                 `).run(origin, destination);
                 
-                extractedData.crowding.forEach((item: { trip_id: string; crowding: CrowdingLevel }) => {
+                extractedData.crowding.forEach((item: {
+                  trip_id: string;
+                  crowding: CrowdingLevel;
+                  scheduled_departure: string | null;
+                  estimated_departure: string | null;
+                  scheduled_arrival: string | null;
+                  estimated_arrival: string | null;
+                }) => {
                   insertCache.run(
                     origin,
                     destination,
                     item.trip_id,
-                    item.crowding
+                    item.crowding,
+                    item.scheduled_departure,
+                    item.estimated_departure,
+                    item.scheduled_arrival,
+                    item.estimated_arrival
                   );
                 });
               });
