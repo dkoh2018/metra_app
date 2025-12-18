@@ -545,13 +545,17 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
     };
   }, []);
 
-  // Count trains by direction (Global Total)
+  // Count trains by direction (Global Total - includes both UP-NW and MD-W lines)
   const inboundCount = trains.filter(t => t.direction === 'inbound').length;
   const outboundCount = trains.filter(t => t.direction === 'outbound').length;
+  const totalCount = inboundCount + outboundCount;
   
   // Debug logging
   console.log('UnifiedTrainMap:', {
     totalTrains: trains.length,
+    inboundCount,
+    outboundCount,
+    totalCount,
     railLines: Object.keys(railLines),
   });
 
@@ -603,7 +607,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
           
           {/* Station Markers - Show ALL stations */}
           {Object.entries(STATIONS).map(([key, station]) => {
-            // Determine icon: Terminal or Palatine = Red, others = Grey
+            // Determine icon: Terminal or Highlighted stations = Red, others = Grey
             const isRed = station.isTerminal || station.isHighlight;
             const icon = isRed ? terminalIcon : stationIcon;
             
@@ -791,22 +795,30 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
           </div>
         )}
         
-        {/* Combined Legend & Status */}
-        <div className="absolute top-2 right-2 z-[1000] bg-white/95 backdrop-blur-sm rounded-md px-2 py-1 text-[10px] shadow-sm border border-zinc-200">
-          <div className="flex items-center gap-2">
+        {/* Combined Legend & Status - Shows total counts across both UP-NW and MD-W lines */}
+        <div className="absolute top-2 right-2 z-[1000] bg-white/95 backdrop-blur-sm rounded-md px-2.5 py-1.5 text-[10px] shadow-sm border border-zinc-200">
+          <div className="flex items-center gap-2.5">
             {/* Inbound count with arrow */}
             <div className="flex items-center gap-1 text-blue-600 font-semibold">
-              <span>{inboundCount}</span>
-              <span className="text-[12px]">→</span>
+              <span className="text-xs font-bold">{inboundCount}</span>
+              <span className="text-[11px]">→</span>
               <span className="text-[9px] text-blue-500 font-normal">Chicago</span>
             </div>
             <span className="text-zinc-300 text-[10px]">|</span>
             {/* Outbound count with arrow */}
             <div className="flex items-center gap-1 text-amber-600 font-semibold">
-              <span className="text-[12px]">←</span>
-              <span>{outboundCount}</span>
+              <span className="text-[11px]">←</span>
+              <span className="text-xs font-bold">{outboundCount}</span>
               <span className="text-[9px] text-amber-500 font-normal">Outbound</span>
             </div>
+            {totalCount > 0 && (
+              <>
+                <span className="text-zinc-300 text-[10px]">|</span>
+                <span className="text-[9px] text-zinc-500 font-normal">
+                  Total: <span className="font-semibold text-zinc-700">{totalCount}</span>
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>

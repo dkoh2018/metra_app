@@ -126,7 +126,8 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
       stopTimesByTrip.get(st.trip_id)!.push(st);
     });
     
-    // Determine express trains (trains with fewer stops between Palatine and OTC)
+    // Determine express trains (trains with fewer stops - typically express/limited service)
+    // Note: Express detection is based on total stops in trip, not specific station pairs
     const PALATINE_STOP = 'PALATINE';
     const OTC_STOP = 'OTC';
     

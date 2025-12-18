@@ -4,8 +4,21 @@ import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 import { getDatabase } from './schema.js';
 
 const METRA_API_URL = 'https://gtfspublic.metrarr.com/gtfs/public';
-const PALATINE_STOP = 'PALATINE';
-const OTC_STOP = 'OTC';
+
+/**
+ * Get list of stops we care about for real-time updates
+ * Includes all highlighted stations and their terminals
+ * This makes it modular - adding a new highlighted station automatically includes it
+ */
+function getMonitoredStops(): string[] {
+  // Highlighted stations (stations with isHighlight: true)
+  const highlightedStations = ['PALATINE', 'SCHAUM'];
+  
+  // Terminals for each line
+  const terminals = ['OTC', 'CUS'];
+  
+  return [...highlightedStations, ...terminals];
+}
 
 /**
  * Get Chicago date string in YYYY-MM-DD format
@@ -84,10 +97,11 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
           const tripId = entity.tripUpdate.trip?.tripId;
           if (!tripId) continue;
           
-          // Only process stops we care about (Palatine and OTC)
+          // Only process stops we care about (highlighted stations and terminals)
+          const monitoredStops = getMonitoredStops();
           for (const stopTimeUpdate of entity.tripUpdate.stopTimeUpdate || []) {
             const stopId = stopTimeUpdate.stopId;
-            if (stopId !== PALATINE_STOP && stopId !== OTC_STOP) continue;
+            if (!monitoredStops.includes(stopId)) continue;
             
             const scheduledArrival = stopTimeUpdate.scheduleRelationship === 1 // SCHEDULED
               ? stopTimeUpdate.arrival?.time?.toString()
@@ -174,7 +188,7 @@ export function getRealtimeDelay(tripId: string, stopId: string): number {
 }
 
 /**
- * Get all current delays for trains at Palatine or OTC
+ * Get all current delays for trains at monitored stops (highlighted stations and terminals)
  * Returns predicted times for better delay visibility
  * Deduplicates by trip_id and stop_id to return only the latest update for each trip/stop combination
  */
@@ -189,6 +203,10 @@ export function getAllDelays(): Array<{
 }> {
   const db = getDatabase();
   
+  // Get list of monitored stops (highlighted stations + terminals)
+  const monitoredStops = getMonitoredStops();
+  const placeholders = monitoredStops.map(() => '?').join(',');
+  
   // Use a subquery to get only the latest update for each trip_id/stop_id combination
   // This ensures we don't return duplicate entries for the same train/stop
   // Deduplicate by trip_id and stop_id to get only the latest update
@@ -201,14 +219,14 @@ export function getAllDelays(): Array<{
     INNER JOIN (
       SELECT trip_id, stop_id, MAX(update_timestamp) as max_timestamp
       FROM realtime_updates
-      WHERE stop_id IN ('PALATINE', 'OTC')
+      WHERE stop_id IN (${placeholders})
         AND update_timestamp > datetime('now', '-5 minutes')
       GROUP BY trip_id, stop_id
     ) r2 ON r1.trip_id = r2.trip_id 
          AND r1.stop_id = r2.stop_id 
          AND r1.update_timestamp = r2.max_timestamp
     ORDER BY r1.update_timestamp DESC
-  `).all() as Array<{ 
+  `).all(...monitoredStops) as Array<{ 
     trip_id: string; 
     stop_id: string; 
     delay_seconds: number;

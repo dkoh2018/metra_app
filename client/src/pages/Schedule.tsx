@@ -8,7 +8,7 @@ import { getChicagoTime, getServiceDayType, getCurrentMinutesInChicago, formatCh
 // Lazy load the map component since it's heavy
 const TrainMap = lazy(() => import('@/components/TrainMap'));
 import { StationSelector } from '@/components/StationSelector';
-import { STATIONS } from '@/lib/stations';
+import { STATIONS, Station } from '@/lib/stations';
 
 type DayType = 'weekday' | 'saturday' | 'sunday';
 type Direction = 'inbound' | 'outbound';
@@ -236,8 +236,17 @@ export default function Schedule() {
   const [showDelayDebug, setShowDelayDebug] = useState(false);
   
   // Phase 2: Multi-Station State
-  const [selectedGtfsId, setSelectedGtfsId] = useState<string>(STATIONS.palatine.gtfsId!);
-  const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || STATIONS.palatine;
+  // Get default station: first highlighted station, or fallback to first station with gtfsId
+  const getDefaultStation = (): Station => {
+    const highlighted = Object.values(STATIONS).find(s => s.isHighlight && s.gtfsId);
+    if (highlighted) return highlighted;
+    const firstWithGtfsId = Object.values(STATIONS).find(s => s.gtfsId);
+    return firstWithGtfsId || Object.values(STATIONS)[0];
+  };
+  
+  const defaultStation = getDefaultStation();
+  const [selectedGtfsId, setSelectedGtfsId] = useState<string>(defaultStation.gtfsId!);
+  const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || defaultStation;
   
   console.log('[Schedule] Render State:', { 
     selectedGtfsId, 
@@ -757,6 +766,7 @@ export default function Schedule() {
 
   // Find next train based on current view mode
   // Uses estimated departure time when available to prevent skipping delayed trains
+  // Handles overnight trains correctly (24:XX format and 00:XX when viewing late at night)
   const computedNextTrain = useMemo(() => {
     const currentMinutes = getCurrentMinutesInChicago();
     const currentSchedule = scheduleData[dayType];
@@ -765,6 +775,33 @@ export default function Schedule() {
     if (trains.length === 0) {
       return null;
     }
+    
+    // Helper to convert departure time to minutes for comparison (handles overnight trains)
+    const getTrainMinutesForComparison = (departureTimeStr: string, currentMinutesValue: number): number => {
+      const [hours, minutes] = departureTimeStr.split(':').map(Number);
+      
+      // GTFS overnight trains (24:XX, 25:XX) are for "next day"
+      if (hours >= 24) {
+        // Normalize to 0-23 range and add 24 hours (1440 minutes) for comparison
+        const normalizedHours = hours - 24;
+        return normalizedHours * 60 + minutes + (24 * 60); // Add day offset
+      }
+      
+      // Regular time (00:XX to 23:XX)
+      let trainMinutes = hours * 60 + minutes;
+      
+      // If viewing late at night (after 6 PM) and train is early morning (00:XX to 04:XX)
+      // Treat it as "tomorrow" (add 24 hours)
+      const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM
+      const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
+      
+      if (currentMinutesValue >= LATE_NIGHT_THRESHOLD && trainMinutes < EARLY_MORNING_CUTOFF) {
+        // This is an overnight train for tonight/tomorrow - add day offset
+        trainMinutes += 24 * 60;
+      }
+      
+      return trainMinutes;
+    };
     
     const next = trains.find(train => {
       // Check if this train has an estimated departure time
@@ -784,13 +821,22 @@ export default function Schedule() {
           if (period === 'AM' && hours === 12) hours = 0;
           
           const estimatedMinutes = hours * 60 + mins;
-          return estimatedMinutes > currentMinutes;
+          
+          // Handle overnight for estimated times too (if estimated time is early morning when viewing late at night)
+          const LATE_NIGHT_THRESHOLD = 18 * 60;
+          const EARLY_MORNING_CUTOFF = 4 * 60;
+          let adjustedEstimatedMinutes = estimatedMinutes;
+          
+          if (currentMinutes >= LATE_NIGHT_THRESHOLD && estimatedMinutes < EARLY_MORNING_CUTOFF) {
+            adjustedEstimatedMinutes += 24 * 60;
+          }
+          
+          return adjustedEstimatedMinutes > currentMinutes;
         }
       }
       
-      // Fallback to scheduled time
-      const [hours, minutes] = departureTimeStr.split(':').map(Number);
-      const trainMinutes = hours * 60 + minutes;
+      // Use helper function to handle overnight trains correctly
+      const trainMinutes = getTrainMinutesForComparison(departureTimeStr, currentMinutes);
       return trainMinutes > currentMinutes;
     });
     
