@@ -1406,13 +1406,17 @@ const ScheduleTable = memo(function ScheduleTable({
       const normalizedHours = depHours - 24;
       const normalizedMinutes = normalizedHours * 60 + depMinutes;
       
-      // Before 1 AM: these overnight trains are still upcoming
-      if (isBeforeServiceDayStart) {
+      // If we are in the early morning (00:00 - 04:00)
+      // Then we can compare directly as we are effectively in the "same" extended day
+      const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
+      
+      if (currentMinutes < EARLY_MORNING_CUTOFF) {
         return normalizedMinutes < currentMinutes;
       }
       
-      // After 1 AM: these overnight trains (which ran earlier tonight) are departed
-      return true;
+      // Otherwise, if we are later in the day (4 AM - 23:59)
+      // Any 24:xx train is in the future (tonight/tomorrow morning).
+      return false;
     }
     
     const depTotalMinutes = depHours * 60 + depMinutes;
