@@ -1705,9 +1705,15 @@ const ScheduleTable = memo(function ScheduleTable({
                   const minutesUntil = getMinutesUntilDeparture(countdownTime);
                   
                   if (minutesUntil !== null && minutesUntil >= 0) {
+                    const hours = Math.floor(minutesUntil / 60);
+                    const mins = minutesUntil % 60;
+                    const timeText = hours > 0 
+                      ? `${hours}h${mins > 0 ? ` ${mins}m` : ''}` 
+                      : `${mins}m`;
+
                     return (
                       <span className={isNext ? "text-primary font-semibold" : "text-zinc-500"}>
-                        {minutesUntil}m
+                        {timeText}
                       </span>
                     );
                   }
