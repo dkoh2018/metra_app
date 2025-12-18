@@ -585,6 +585,7 @@ export default function Schedule() {
   }, []);
 
   // Find next train based on current view mode
+  // Uses estimated departure time when available to prevent skipping delayed trains
   const computedNextTrain = useMemo(() => {
     const currentMinutes = getCurrentMinutesInChicago();
     const currentSchedule = scheduleData[dayType];
@@ -595,13 +596,35 @@ export default function Schedule() {
     }
     
     const next = trains.find(train => {
-      const [hours, minutes] = train.departureTime.split(':').map(Number);
+      // Check if this train has an estimated departure time
+      const estimate = estimatedTimes.get(train.id);
+      let departureTimeStr = train.departureTime;
+      
+      // If there's an estimated departure, parse it to 24h format
+      if (estimate?.predicted_departure) {
+        // Parse "8:13 PM" format to minutes
+        const match = estimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (match) {
+          let hours = parseInt(match[1], 10);
+          const mins = parseInt(match[2], 10);
+          const period = match[3].toUpperCase();
+          
+          if (period === 'PM' && hours !== 12) hours += 12;
+          if (period === 'AM' && hours === 12) hours = 0;
+          
+          const estimatedMinutes = hours * 60 + mins;
+          return estimatedMinutes > currentMinutes;
+        }
+      }
+      
+      // Fallback to scheduled time
+      const [hours, minutes] = departureTimeStr.split(':').map(Number);
       const trainMinutes = hours * 60 + minutes;
       return trainMinutes > currentMinutes;
     });
     
     return next || trains[0] || null;
-  }, [dayType, currentTime, direction, scheduleData]);
+  }, [dayType, currentTime, direction, scheduleData, estimatedTimes]);
   
   useEffect(() => {
     if (nextTrain?.id !== computedNextTrain?.id) {
