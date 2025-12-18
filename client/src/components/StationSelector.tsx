@@ -16,9 +16,15 @@ interface StationSelectorProps {
 
 export function StationSelector({ selectedGtfsId, onStationChange, className }: StationSelectorProps) {
   // Filter out OTC (Chicago) as it's the fixed destination, not a selectable origin for suburban commuters
+  // Filter out OTC and temporarily restrict to Palatine as per user request
+  // TODO: Remove the specific 'PALATINE' check when ready to enable full selector
   const suburbanStations = Object.values(STATIONS)
-    .filter(s => s.gtfsId !== 'OTC' && s.gtfsId !== undefined)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(s => s.gtfsId !== 'OTC' && s.gtfsId !== 'CUS' && (s.gtfsId === 'PALATINE' || s.gtfsId === 'SCHAUM'))
+    .sort((a, b) => {
+      // Keep Palatine at top if desired, or just alphabetical.
+      // Given "vertical fix", I'll keep them alphabetical for now unless specified.
+      return a.name.localeCompare(b.name);
+    });
 
   return (
     <Select value={selectedGtfsId} onValueChange={onStationChange}>

@@ -247,21 +247,29 @@ async function startServer() {
     app.get("/api/tripupdates", (_req, res) => fetchData("tripupdates", res));
     app.get("/api/alerts", (_req, res) => fetchData("alerts", res));
 
-    // UP-NW specific train positions for the map
+    // Line-specific train positions (UP-NW, MD-W, etc.)
     // Cache positions to prevent hitting Metra rate limits with multiple users
-    let positionsCache: {
+    // Map cache by lineId
+    const positionsCache = new Map<string, {
       data: any;
       timestamp: number;
-    } | null = null;
+    }>();
     const POSITIONS_CACHE_TTL = 10 * 1000; // 10 seconds for real-time feel
 
-    app.get("/api/positions/upnw", async (req, res) => {
+    app.get("/api/positions/:lineId", async (req, res) => {
       try {
+        const { lineId } = req.params;
+        const validLines = ['UP-NW', 'MD-W'];
+        if (!validLines.includes(lineId)) {
+          return res.status(400).json({ error: "Invalid line ID" });
+        }
+
         const now = Date.now();
+        const cache = positionsCache.get(lineId);
         
         // Serve from cache if fresh
-        if (positionsCache && (now - positionsCache.timestamp < POSITIONS_CACHE_TTL)) {
-          return res.json(positionsCache.data);
+        if (cache && (now - cache.timestamp < POSITIONS_CACHE_TTL)) {
+          return res.json(cache.data);
         }
 
         const axios = (await import("axios")).default;
@@ -283,11 +291,11 @@ async function startServer() {
           bytes: String,
         });
 
-        // Filter for UP-NW trains only and add direction info
-        const upnwTrains = body.entity
-          .filter((entity: any) => entity.vehicle?.trip?.routeId === 'UP-NW')
+        // Filter for specific line trains only and add direction info
+        const lineTrains = body.entity
+          .filter((entity: any) => entity.vehicle?.trip?.routeId === lineId)
           .map((entity: any) => {
-            const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace('UNW', '') || 'Unknown';
+            const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace(lineId === 'UP-NW' ? 'UNW' : 'MDW', '') || 'Unknown';
             const trainNum = parseInt(trainNumber);
             const direction = !isNaN(trainNum) ? (trainNum % 2 === 0 ? 'inbound' : 'outbound') : 'unknown';
             
@@ -305,16 +313,16 @@ async function startServer() {
           });
         
         const responseData = {
-          trains: upnwTrains,
+          trains: lineTrains,
           timestamp: new Date().toISOString(),
-          count: upnwTrains.length
+          count: lineTrains.length
         };
 
-        // Update cache
-        positionsCache = {
+        // Update cache for this line
+        positionsCache.set(lineId, {
           data: responseData,
           timestamp: now
-        };
+        });
         
         // Save to database if available and save param is set
         const shouldSave = req.query.save === 'true';
@@ -326,7 +334,7 @@ async function startServer() {
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `);
             
-            for (const train of upnwTrains) {
+            for (const train of lineTrains) {
               insert.run(
                 train.trainNumber,
                 train.tripId,
@@ -338,7 +346,7 @@ async function startServer() {
                 train.timestamp
               );
             }
-            console.log(`Saved ${upnwTrains.length} train positions to database`);
+            console.log(`Saved ${lineTrains.length} train positions to database`);
           } catch (dbError: any) {
             console.warn("Could not save positions to database:", dbError.message);
           }
@@ -346,8 +354,8 @@ async function startServer() {
         
         res.json(responseData);
       } catch (error: any) {
-        console.error("Error fetching UP-NW positions:", error.message);
-        res.status(500).json({ error: "Failed to fetch UP-NW positions" });
+        console.error(`Error fetching ${req.params.lineId} positions:`, error.message);
+        res.status(500).json({ error: `Failed to fetch ${req.params.lineId} positions` });
       }
     });
     
@@ -377,9 +385,15 @@ async function startServer() {
       }
     });
 
-    // Get UP-NW rail line shape for map overlay
-    app.get("/api/shapes/upnw", async (_req, res) => {
+    // Get rail line shape for map overlay
+    app.get("/api/shapes/:lineId", async (req, res) => {
       try {
+        const { lineId } = req.params;
+        const validLines = ['UP-NW', 'MD-W'];
+        if (!validLines.includes(lineId)) {
+          return res.status(400).json({ error: "Invalid line ID" });
+        }
+
         const fs = (await import("fs")).default;
         // In production, use cwd-relative path; in dev, use __dirname-relative
         const shapesPath = process.env.NODE_ENV === 'production'
@@ -391,19 +405,23 @@ async function startServer() {
         const inboundPoints: Array<[number, number]> = [];
         const outboundPoints: Array<[number, number]> = [];
         
+        // Shape IDs in GTFS: UP-NW_IB_1, MD-W_IB_1, etc.
+        const ibShapeId = `${lineId}_IB_1`;
+        const obShapeId = `${lineId}_OB_1`;
+        
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
           
           const [shape_id, lat_str, lng_str] = line.split(",");
           
-          if (shape_id === "UP-NW_IB_1") {
+          if (shape_id === ibShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_IB'))) {
             const lat = parseFloat(lat_str);
             const lng = parseFloat(lng_str);
             if (!isNaN(lat) && !isNaN(lng)) {
               inboundPoints.push([lat, lng]);
             }
-          } else if (shape_id === "UP-NW_OB_1") {
+          } else if (shape_id === obShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_OB'))) {
             const lat = parseFloat(lat_str);
             const lng = parseFloat(lng_str);
             if (!isNaN(lat) && !isNaN(lng)) {
@@ -428,9 +446,10 @@ async function startServer() {
         if (!getAllSchedules) {
           return res.status(503).json({ error: "Database not available. Using static schedule data." });
         }
-        const { station } = req.query;
+        const { station, terminal } = req.query;
         const stationId = typeof station === 'string' ? station : 'PALATINE';
-        const schedules = getAllSchedules(stationId);
+        const terminalId = typeof terminal === 'string' ? terminal : 'OTC';
+        const schedules = getAllSchedules(stationId, terminalId);
         res.json(schedules);
       } catch (error: any) {
         console.error("Error fetching schedule:", error.message);
@@ -450,7 +469,8 @@ async function startServer() {
           return res.status(503).json({ error: "Database not available" });
         }
         const stationId = typeof station === 'string' ? station : 'PALATINE';
-        const schedules = getAllSchedules(stationId);
+        const terminalId = typeof req.query.terminal === 'string' ? req.query.terminal : 'OTC';
+        const schedules = getAllSchedules(stationId, terminalId);
         res.json(schedules[dayType as keyof typeof schedules]);
       } catch (error: any) {
         console.error("Error fetching schedule:", error.message);
@@ -476,11 +496,13 @@ async function startServer() {
           : parseInt(currentTime as string);
         
         const stationId = typeof station === 'string' ? station : 'PALATINE';
+        const terminalId = typeof req.query.terminal === 'string' ? req.query.terminal : 'OTC';
         const next = getNextTrain(
           direction as 'inbound' | 'outbound',
           timeMinutes,
           dayType as 'weekday' | 'saturday' | 'sunday',
-          stationId
+          stationId,
+          terminalId
         );
         
         res.json({ train: next });
@@ -551,10 +573,11 @@ async function startServer() {
       console.log(`[API] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
       let browser: any = null;
       let db: any = null;
-      const cacheKey = `${req.query.origin || 'PALATINE'}_${req.query.destination || 'OTC'}`;
+      const { origin = 'PALATINE', destination = 'OTC', force, line = 'UP-NW' } = req.query;
+      const lineId = typeof line === 'string' ? line : 'UP-NW';
+      const cacheKey = `${origin}_${destination}_${lineId}`;
       
       try {
-        const { origin = 'PALATINE', destination = 'OTC', force } = req.query;
         const forceRefresh = force === 'true' || force === '1';
         const { getDatabase } = await import("./db/schema.js");
         db = getDatabase();
@@ -672,7 +695,9 @@ async function startServer() {
               firstTrainTimestamp = Math.floor(now.getTime() / 1000);
             }
             
-            const url = `https://www.metra.com/schedules?line=UP-NW&orig=${origin}&dest=${destination}&time=${firstTrainTimestamp}&allstops=0&redirect=${firstTrainTimestamp}`;
+
+            
+            const url = `https://www.metra.com/schedules?line=${lineId}&orig=${origin}&dest=${destination}&time=${firstTrainTimestamp}&allstops=0&redirect=${firstTrainTimestamp}`;
             
             scrapeBrowser = await puppeteer.launch({
               headless: true,
@@ -734,7 +759,11 @@ async function startServer() {
               // First: Extract crowding from .trip-row elements
               const tripRows = Array.from(document.querySelectorAll('.trip-row'));
               if (tripRows.length > 0) {
-                 debug.push(`First Row HTML: ${tripRows[0].outerHTML.substring(0, 500)}...`);
+                 debug.push(`Found ${tripRows.length} trip rows. First 3 IDs: ${tripRows.slice(0, 3).map(r => r.getAttribute('id')).join(', ')}`);
+              } else {
+                 debug.push('WARNING: No .trip-row elements found!');
+                 // Log body content to debug selector failure
+                 debug.push(`Body start: ${document.body.innerHTML.substring(0, 500)}...`);
               }
               
               tripRows.forEach((tripCell: Element) => {
@@ -786,9 +815,9 @@ async function startServer() {
                 if (!cellId) return;
                 
                 // Extract trip_id by removing the stop suffix (e.g., "_APALATINE", "_OTC", "_PALATINE")
-                // Trip IDs look like: UP-NW_UNW672_V3_A
-                // Cell IDs look like: UP-NW_UNW672_V3_APALATINE or UP-NW_UNW672_V3_AOTC
-                const tripIdMatch = cellId.match(/^(UP-NW_UNW\d+_V\d+_[A-Z])/);
+                // Trip IDs look like: UP-NW_UNW672_V3_A or MD-W_MW2254_V2_A
+                // Cell IDs look like: UP-NW_UNW672_V3_APALATINE or MD-W_MW2254_V2_ASCHAUM
+                const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W)_[A-Z0-9]+_V\d+_[A-Z])/);
                 if (!tripIdMatch) return;
                 const tripId = tripIdMatch[1];
                 
@@ -824,12 +853,15 @@ async function startServer() {
                      if (index < 5) debug.push(`Trip ${tripId} not found in resultsMap`);
                 }
               });
+
+              // Final Summary
+              const crowdingFound = Array.from(resultsMap.values()).filter(r => r.crowding !== 'low').length;
+              const estimatesFound = Array.from(resultsMap.values()).filter(r => r.estimated_departure || r.estimated_arrival).length;
+              debug.push(`SCRAPER SUMMARY: Total Trips: ${resultsMap.size}, Crowding Updates: ${crowdingFound}, Estimates Found: ${estimatesFound}`);
               
-              return {
-                crowding: Array.from(resultsMap.values()),
-                debug
-              };
+              return { crowding: Array.from(resultsMap.values()), debug };
             }, origin, destination);
+
 
             if (extractedData.debug && extractedData.debug.length > 0) {
                 console.log("SCRAPER DEBUG LOGS:\n" + extractedData.debug.join('\n'));

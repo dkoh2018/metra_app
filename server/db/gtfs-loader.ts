@@ -77,8 +77,9 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     
     // Load trips
     const trips = parseCSV(path.join(GTFS_DIR, 'trips.txt')) as unknown as Trip[];
-    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW');
-    console.log(`Found ${tripsByRoute.length} UP-NW trips`);
+    // Filter for UP-NW and MD-W routes (Milwaukee District West)
+    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W');
+    console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W)`);
     
     // Load calendar
     const calendars = parseCSV(path.join(GTFS_DIR, 'calendar.txt')) as unknown as Calendar[];
@@ -114,7 +115,7 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     const tripIds = new Set(tripsByRoute.map(t => t.trip_id));
     const relevantStopTimes = stopTimes.filter(st => tripIds.has(st.trip_id));
     
-    console.log(`Found ${relevantStopTimes.length} stop times for UP-NW trips`);
+    console.log(`Found ${relevantStopTimes.length} stop times for UP-NW/MD-W trips`);
     
     // Group stop times by trip
     const stopTimesByTrip = new Map<string, StopTime[]>();
@@ -153,16 +154,15 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
       // Let's stick to the reliable logic: Chicago OTC is stop_id 'OTC'.
       
       let direction = 'outbound';
-      if (destinationStop.stop_id === 'OTC') {
+      // OTC = Ogilvie, CUS = Chicago Union Station
+      if (destinationStop.stop_id === 'OTC' || destinationStop.stop_id === 'CUS') {
         direction = 'inbound';
-      } else if (originStop.stop_id === 'OTC') {
+      } else if (originStop.stop_id === 'OTC' || originStop.stop_id === 'CUS') {
         direction = 'outbound';
       } else {
-        // Fallback for partial trips that might not touch OTC (rare but possible)
-        // Check standard direction_id from trips.txt if we had it, or assume based on sequence
-        // For UP-NW, 'OTC' is roughly sequence 1 or very low.
-        // Let's rely on the trip direction_id if defined, otherwise infer.
-        // The current trip object has direction_id.
+        // Fallback for partial trips that might not touch terminals
+        // Use GTFS direction_id if available (0 usually inbound, 1 outbound for Metra)
+        // Or default to inbound if unknown
         direction = trip.direction_id === '1' ? 'outbound' : 'inbound';
       }
       

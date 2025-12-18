@@ -59,7 +59,8 @@ function getServiceIdsForDayType(dayType: 'weekday' | 'saturday' | 'sunday'): st
  */
 export function getScheduleForDayType(
   dayType: 'weekday' | 'saturday' | 'sunday',
-  stationId: string = 'PALATINE'
+  stationId: string = 'PALATINE',
+  terminalId: string = 'OTC'
 ): DayType {
   const db = getDatabase();
   const serviceIdList = getServiceIdsForDayType(dayType);
@@ -75,7 +76,7 @@ export function getScheduleForDayType(
   // Deduplicate by departure_time and arrival_time to avoid multiple service variants
   // s1 = Origin (Start of trip, min sequence)
   // s2 = Destination (End of trip, max sequence)
-  // Get inbound trains (Selected Station -> Chicago)
+  // Get inbound trains (Selected Station -> Terminal)
   const inboundTrains = db.prepare(`
     SELECT 
       MIN(s1.trip_id) as trip_id,
@@ -87,12 +88,12 @@ export function getScheduleForDayType(
     WHERE s1.direction = 'inbound'
       AND s1.service_id IN (${placeholders})
       AND s1.stop_id = ?
-      AND s2.stop_id = 'OTC'
+      AND s2.stop_id = ?
     GROUP BY s1.departure_time, s2.arrival_time
     ORDER BY s1.departure_time
-  `).all(...serviceIdList, stationId) as TrainSchedule[];
+  `).all(...serviceIdList, stationId, terminalId) as TrainSchedule[];
   
-  // Get outbound trains (Chicago -> Selected Station)
+  // Get outbound trains (Terminal -> Selected Station)
   const outboundTrains = db.prepare(`
     SELECT 
       MIN(s1.trip_id) as trip_id,
@@ -103,11 +104,11 @@ export function getScheduleForDayType(
     JOIN schedules s2 ON s1.trip_id = s2.trip_id
     WHERE s1.direction = 'outbound'
       AND s1.service_id IN (${placeholders})
-      AND s1.stop_id = 'OTC'
+      AND s1.stop_id = ?
       AND s2.stop_id = ?
     GROUP BY s1.departure_time, s2.arrival_time
     ORDER BY s1.departure_time
-  `).all(...serviceIdList, stationId) as TrainSchedule[];
+  `).all(...serviceIdList, terminalId, stationId) as TrainSchedule[];
   
   // Don't close - connection is reused for better performance
   
@@ -121,15 +122,15 @@ export function getScheduleForDayType(
 /**
  * Get all schedules (weekday, saturday, sunday)
  */
-export function getAllSchedules(stationId: string = 'PALATINE'): {
+export function getAllSchedules(stationId: string = 'PALATINE', terminalId: string = 'OTC'): {
   weekday: DayType;
   saturday: DayType;
   sunday: DayType;
 } {
   return {
-    weekday: getScheduleForDayType('weekday', stationId),
-    saturday: getScheduleForDayType('saturday', stationId),
-    sunday: getScheduleForDayType('sunday', stationId)
+    weekday: getScheduleForDayType('weekday', stationId, terminalId),
+    saturday: getScheduleForDayType('saturday', stationId, terminalId),
+    sunday: getScheduleForDayType('sunday', stationId, terminalId)
   };
 }
 
@@ -140,9 +141,10 @@ export function getNextTrain(
   direction: 'inbound' | 'outbound',
   currentTimeMinutes: number,
   dayType: 'weekday' | 'saturday' | 'sunday',
-  stationId: string = 'PALATINE'
+  stationId: string = 'PALATINE',
+  terminalId: string = 'OTC'
 ): TrainSchedule | null {
-  const schedule = getScheduleForDayType(dayType, stationId);
+  const schedule = getScheduleForDayType(dayType, stationId, terminalId);
   const trains = direction === 'inbound' ? schedule.inbound : schedule.outbound;
   
   const timeToMinutes = (timeStr: string): number => {
@@ -238,7 +240,8 @@ export function shouldUpdateGTFS(): boolean {
   }
   
   // Data is fresh enough
-  console.log(`📅 GTFS: Data is ${daysSinceUpdate.toFixed(1)} days old, no update needed`);
+  const ageDescription = daysSinceUpdate < 0 ? 'just updated' : `${daysSinceUpdate.toFixed(1)} days old`;
+  console.log(`📅 GTFS: Data is ${ageDescription}, no update needed`);
   return false;
 }
 

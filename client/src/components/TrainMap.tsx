@@ -12,7 +12,8 @@ import { STATIONS, type Station } from '@/lib/stations';
 // Station definitions moved to @/lib/stations.ts
 
 // Map center - Focused between Palatine and Jefferson Park (Lat shifted North-West)
-const MAP_CENTER: [number, number] = [41.985, -87.78];
+// Map center - Shifted West to include Schaumburg (-88.11) and Palatine (-88.05)
+const MAP_CENTER: [number, number] = [42.05, -87.95];
 
 // Train data from the API
 interface TrainPosition {
@@ -267,6 +268,8 @@ const createUserLocationIcon = () => {
   });
 };
 
+
+
 // Custom control to reset map view - Matches Leaflet zoom control style
 function ResetZoomControl() {
   const map = useMap();
@@ -308,8 +311,10 @@ function ResetZoomControl() {
   );
 }
 
+
 interface TrainMapProps {
   className?: string;
+  // lineId is now ignored/optional as we show ALL lines
 }
 
 export default function TrainMap({ className = '' }: TrainMapProps) {
@@ -319,7 +324,10 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [stationIcon, setStationIcon] = useState<L.DivIcon | null>(null);
   const [terminalIcon, setTerminalIcon] = useState<L.DivIcon | null>(null);
-  const [railLine, setRailLine] = useState<Array<[number, number]>>([]);
+  
+  // Store multiple lines: 'UP-NW' -> points[], 'MD-W' -> points[]
+  const [railLines, setRailLines] = useState<Record<string, Array<[number, number]>>>({});
+  
   
   // Schedule state
   interface TripSchedule {
@@ -360,55 +368,67 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
     }
   };
 
-  // Fetch train positions
+  // Fetch train positions for ALL lines
   const fetchPositions = useCallback(async () => {
     try {
-      const response = await fetch('/api/positions/upnw');
-      if (!response.ok) throw new Error('Failed to fetch positions');
-      
-      const data = await response.json();
-      setTrains(data.trains || []);
+      // Fetch both lines in parallel
+      const lines = ['UP-NW', 'MD-W'];
+      const responses = await Promise.all(
+        lines.map(id => fetch(`/api/positions/${id}`).then(r => r.json()))
+      );
+
+      // Merge trains from all lines
+      // Add a 'lineId' property to each train if needed, though we track by ID
+      const allTrains = responses.flatMap((data, index) => {
+        if (data && Array.isArray(data.trains)) {
+          return data.trains.map((t: any) => ({ ...t, lineId: lines[index] }));
+        }
+        return [];
+      });
+
+      setTrains(allTrains);
       setLastUpdate(new Date());
       setError(null);
     } catch (err: any) {
       console.error('Error fetching train positions:', err);
-      setError(err.message);
+      // Don't show error to user if just one failed, try to keep going? 
+      // For now, simple error
+      // setError(err.message); 
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Fetch rail line shape on mount
+  // Fetch rail line shapes for ALL lines on mount
   useEffect(() => {
-    fetch('/api/shapes/upnw')
-      .then(res => res.json())
-      .then(data => {
-        console.log('Loaded rail shapes:', {
-          inbound: data.inbound?.length,
-          outbound: data.outbound?.length
+    const lines = ['UP-NW', 'MD-W'];
+    
+    Promise.all(lines.map(id => fetch(`/api/shapes/${id}`).then(r => r.json())))
+      .then(results => {
+        const newRailLines: Record<string, Array<[number, number]>> = {};
+        
+        results.forEach((data, index) => {
+          const lineId = lines[index];
+          
+          if (Array.isArray(data.inbound) && data.inbound.length > 0) {
+             const firstItem = data.inbound[0];
+             
+             if (Array.isArray(firstItem) && firstItem.length > 0 && Array.isArray(firstItem[0])) {
+                 // Multi-line format: Find the longest line (Main Line)
+                 const segments = data.inbound as Array<Array<[number, number]>>;
+                 const mainLine = segments.reduce((prev, current) => (prev.length > current.length) ? prev : current, []);
+                 newRailLines[lineId] = mainLine;
+             } else {
+                 // Single-line format
+                 newRailLines[lineId] = data.inbound;
+             }
+          }
         });
         
-        // Use inbound line as the main track (if server returns multiple, we'll need to adjust, but assuming revert on server)
-        // Check if data.inbound is array of arrays (Multi-line) or array of points (Single-line)
-        if (Array.isArray(data.inbound) && data.inbound.length > 0) {
-           const firstItem = data.inbound[0];
-           // If first item is an array AND its first item is a number (point), then data.inbound is Array<Point> (Single Line)
-           // If first item is an array AND its first item is an array, then data.inbound is Array<Line> (Multi Line)
-           
-           if (Array.isArray(firstItem) && firstItem.length > 0 && Array.isArray(firstItem[0])) {
-               // Multi-line format: Find the longest line (Main Line)
-               const lines = data.inbound as Array<Array<[number, number]>>;
-               const mainLine = lines.reduce((prev, current) => (prev.length > current.length) ? prev : current, []);
-               setRailLine(mainLine);
-           } else {
-               // Single-line format
-               setRailLine(data.inbound);
-           }
-        } else {
-           setRailLine([]);
-        }
+        console.log('Loaded unified rail shapes:', Object.keys(newRailLines));
+        setRailLines(newRailLines);
       })
-      .catch(err => console.error('Error loading rail line:', err));
+      .catch(err => console.error('Error loading rail lines:', err));
   }, []);
 
   // Create icons and fetch positions on mount
@@ -477,17 +497,14 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
     };
   }, []);
 
-  // Count trains by direction
+  // Count trains by direction (Global Total)
   const inboundCount = trains.filter(t => t.direction === 'inbound').length;
   const outboundCount = trains.filter(t => t.direction === 'outbound').length;
   
   // Debug logging
-  console.log('TrainMap Debug:', {
+  console.log('UnifiedTrainMap:', {
     totalTrains: trains.length,
-    inbound: inboundCount,
-    outbound: outboundCount,
-    railLinePoints: railLine.length,
-    trainData: trains.map(t => ({ id: t.id, num: t.trainNumber, lat: t.latitude, lng: t.longitude }))
+    railLines: Object.keys(railLines),
   });
 
   // Don't render until icons are ready
@@ -523,19 +540,20 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
-          {/* UP-NW Rail Line (single track used by trains in both directions) */}
-          {railLine.length > 0 && (
+          {/* Render All Rail Lines */}
+          {Object.entries(railLines).map(([lineId, points]) => (
             <Polyline
-              positions={railLine}
+              key={lineId}
+              positions={points}
               pathOptions={{
-                color: '#6366f1', // Indigo color for the main track
+                color: '#6366f1', // Indigo color for ALL tracks (Uniform look)
                 weight: 6,
                 opacity: 0.8,
               }}
             />
-          )}
+          ))}
           
-          {/* Station Markers */}
+          {/* Station Markers - Show ALL stations */}
           {Object.entries(STATIONS).map(([key, station]) => {
             // Determine icon: Terminal or Palatine = Red, others = Grey
             const isRed = station.isTerminal || station.isHighlight;
@@ -546,6 +564,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                 key={key}
                 position={[station.lat, station.lng]} 
                 icon={icon}
+                zIndexOffset={10} // Base level
               >
                 <Popup offset={[0, -10]} className="station-popup">
                   <div className="font-bold text-sm">{station.name}</div>
@@ -555,24 +574,27 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
             );
           })}
           
-          {/* Train Markers - Snapped to rail line with track-aligned arrows */}
-          {trains.map((train) => {
+          {/* Train Markers - Snapped to THEIR respective rail line */}
+          {trains.map((train: any) => {
+            // Identify which line this train belongs to
+            // We added lineId to train object in fetchPositions
+            const trainLineId = train.lineId || (train.tripId && train.tripId.includes('MD-W') ? 'MD-W' : 'UP-NW');
+            const targetLine = railLines[trainLineId] || railLines['UP-NW']; // Fallback
+
             // Snap train to the rail line and get track bearing
             const { snappedLat, snappedLng, trackBearing } = snapToTrack(
               train.latitude,
               train.longitude,
-              railLine,
+              targetLine || [], // If line not loaded yet, snap might fail/return original
               train.direction || 'unknown'
             );
-            
-            // Debug each train position
-            console.log(`Train ${train.trainNumber}: original [${train.latitude}, ${train.longitude}] -> snapped [${snappedLat}, ${snappedLng}], bearing: ${trackBearing}`);
             
             return (
                 <Marker 
                   key={train.id} 
                   position={[snappedLat, snappedLng]} 
                   icon={createTrainIcon(train.trainNumber, trackBearing, train.direction)}
+                  zIndexOffset={100} // Above stations
                   eventHandlers={{
                     click: () => {
                       if (train.tripId && train.tripId !== selectedTripId) {
@@ -625,7 +647,21 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                           }).map((stop, outputIndex) => {
                             // Find station name from our STATIONS list or fallback to GTFS ID logic
                             const stationEntry = Object.values(STATIONS).find(s => s.gtfsId === stop.stop_id);
-                            const stationName = stationEntry?.name || stop.stop_id;
+                            
+                            const getStationName = (stopId: string) => {
+                              // 1. Check active stations first
+                              const activeStation = Object.values(STATIONS).find(s => s.gtfsId === stopId);
+                              if (activeStation) return activeStation.name;
+
+                              // 2. Fallback: Title Case the ID (e.g. "ABC_DEF" -> "Abc Def")
+                              return stopId
+                                .toLowerCase()
+                                .split('_')
+                                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                .join(' ');
+                            };
+
+                            const stationName = getStationName(stop.stop_id);
                             
                             // Simple time formatting
                             const formatTime = (timeStr: string) => {
@@ -674,6 +710,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
             <Marker
               position={[userLocation.lat, userLocation.lng]}
               icon={userLocationIcon}
+              zIndexOffset={1000} // Always on top
             >
               <Popup className="user-popup">
                 <div className="text-center">

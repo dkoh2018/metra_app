@@ -39,7 +39,8 @@ interface ApiAlerts {
 }
 
 // Cache compiled regex patterns for better performance
-const TRIP_ID_REGEX = /UNW(\d+)/;
+// Supports UP-NW (UNW) and MD-W (MW) IDs
+const TRIP_ID_REGEX = /(?:UNW|MW)(\d+)/;
 const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
 const CROWDING_BADGE_STYLES: Record<CrowdingLevel, string> = {
   low: "bg-green-100 text-emerald-600 font-semibold",
@@ -221,6 +222,12 @@ export default function Schedule() {
   // Phase 2: Multi-Station State
   const [selectedGtfsId, setSelectedGtfsId] = useState<string>(STATIONS.palatine.gtfsId!);
   const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || STATIONS.palatine;
+  
+  console.log('[Schedule] Render State:', { 
+    selectedGtfsId, 
+    line: selectedStation.line, 
+    terminal: selectedStation.terminal 
+  });
 
   const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
   const lastFetchMinuteRef = useRef<number | null>(null);
@@ -253,7 +260,9 @@ export default function Schedule() {
     setScheduleLoading(true);
     setScheduleError(null);
     
-    fetch(`/api/schedule?station=${selectedGtfsId}`)
+    const terminalId = selectedStation.terminal || 'OTC';
+    
+    fetch(`/api/schedule?station=${selectedGtfsId}&terminal=${terminalId}`)
       .then(res => {
         if (!res.ok) {
           if (res.status === 503) {
@@ -305,16 +314,17 @@ export default function Schedule() {
         return res.json();
       })
       .then((data: ApiAlerts[]) => {
-        const upnwAlerts = data.filter(alert => {
+        const currentLine = selectedStation.line || 'UP-NW';
+        const lineAlerts = data.filter(alert => {
           const routeIds = alert.alert?.informedEntity?.map(e => e.routeId) || [];
-          return routeIds.includes('UP-NW') || routeIds.length === 0;
+          return routeIds.includes(currentLine) || routeIds.length === 0;
         });
-        setAlerts(upnwAlerts);
+        setAlerts(lineAlerts);
       })
       .catch(error => {
         console.debug('Could not fetch alerts:', error.message);
       });
-  }, []);
+  }, [selectedStation.line]);
 
   // Fetch delays from API
   useEffect(() => {
@@ -339,8 +349,9 @@ export default function Schedule() {
           const predictedMap = new Map<string, { scheduled?: string; predicted?: string; stop_id: string }>();
           
           data.delays.forEach(delay => {
-            const destinationStopId = direction === 'inbound' ? 'OTC' : selectedGtfsId;
-            const originStopId = direction === 'inbound' ? selectedGtfsId : 'OTC';
+            const terminalId = selectedStation.terminal || 'OTC';
+            const destinationStopId = direction === 'inbound' ? terminalId : selectedGtfsId;
+            const originStopId = direction === 'inbound' ? selectedGtfsId : terminalId;
             
             if (delay.stop_id === destinationStopId) {
               const existingDelay = delayMap.get(delay.trip_id) || 0;
@@ -406,7 +417,10 @@ export default function Schedule() {
       );
 
       const forceParam = forceRefresh ? '&force=true' : '';
-      const palatineToChicago = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=OTC${forceParam}`)
+      const terminalId = selectedStation.terminal || 'OTC';
+      const lineId = selectedStation.line || 'UP-NW';
+      
+      const palatineToChicago = fetch(`/api/crowding?origin=${selectedGtfsId}&destination=${terminalId}&line=${lineId}${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -414,11 +428,11 @@ export default function Schedule() {
           return res.json();
         })
         .catch(error => {
-          console.debug('Could not fetch crowding data (Palatine->Chicago):', error.message);
+          console.debug(`Could not fetch crowding data (${selectedGtfsId}->${terminalId}):`, error.message);
           return null;
         });
       
-      const chicagoToPalatine = fetch(`/api/crowding?origin=OTC&destination=${selectedGtfsId}${forceParam}`)
+      const chicagoToPalatine = fetch(`/api/crowding?origin=${terminalId}&destination=${selectedGtfsId}&line=${lineId}${forceParam}`)
         .then(res => {
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}`);
@@ -426,7 +440,7 @@ export default function Schedule() {
           return res.json();
         })
         .catch(error => {
-          console.debug('Could not fetch crowding data (Chicago->Palatine):', error.message);
+          console.debug(`Could not fetch crowding data (${terminalId}->${selectedGtfsId}):`, error.message);
           return null;
         });
       
@@ -578,7 +592,7 @@ export default function Schedule() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       fetchCrowdingRef.current = null;
     };
-  }, []);
+  }, [selectedGtfsId, direction]);
 
   // Fetch real-time status on mount
   useEffect(() => {
@@ -632,11 +646,12 @@ export default function Schedule() {
       
       if (alertsResponse.ok && 'json' in alertsResponse) {
         const alertData: ApiAlerts[] = await alertsResponse.json();
-        const upnwAlerts = alertData.filter(alert => {
+        const currentLine = selectedStation.line || 'UP-NW';
+        const lineAlerts = alertData.filter(alert => {
           const routeIds = alert.alert?.informedEntity?.map(e => e.routeId) || [];
-          return routeIds.includes('UP-NW') || routeIds.length === 0;
+          return routeIds.includes(currentLine) || routeIds.length === 0;
         });
-        setAlerts(upnwAlerts);
+        setAlerts(lineAlerts);
       }
       
       if (fetchCrowdingRef.current) {
@@ -1173,7 +1188,19 @@ export default function Schedule() {
                         "text-xl sm:text-2xl md:text-3xl font-bold tabular-nums",
                         direction === 'outbound' ? "text-amber-600" : "text-primary"
                       )}>
-                        {minutesUntil}<span className="text-sm sm:text-lg ml-0.5">m</span>
+                        {(() => {
+                           if (minutesUntil < 60) {
+                             return <>{minutesUntil}<span className="text-sm sm:text-lg ml-0.5">m</span></>;
+                           }
+                           const h = Math.floor(minutesUntil / 60);
+                           const m = minutesUntil % 60;
+                           return (
+                             <>
+                               {h}<span className="text-sm sm:text-lg ml-0.5 mr-1">h</span>
+                               {m}<span className="text-sm sm:text-lg ml-0.5">m</span>
+                             </>
+                           );
+                        })()}
                       </div>
                       <div className="text-[8px] sm:text-[10px] uppercase tracking-wide text-zinc-500">
                         until departure
@@ -1267,9 +1294,10 @@ export default function Schedule() {
                       const now = new Date();
                       const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
                       const timestamp = Math.floor(thirtyMinAgo.getTime() / 1000);
-                      const origin = direction === 'inbound' ? 'PALATINE' : 'OTC';
-                      const dest = direction === 'inbound' ? 'OTC' : 'PALATINE';
-                      return `https://www.metra.com/schedules?line=UP-NW&orig=${origin}&dest=${dest}&time=${timestamp}&allstops=0&redirect=${Math.floor(now.getTime() / 1000)}`;
+                      const origin = direction === 'inbound' ? selectedGtfsId : (selectedStation.terminal || 'OTC');
+                      const dest = direction === 'inbound' ? (selectedStation.terminal || 'OTC') : selectedGtfsId;
+                      const line = selectedStation.line || 'UP-NW';
+                      return `https://www.metra.com/schedules?line=${line}&orig=${origin}&dest=${dest}&time=${timestamp}&allstops=0&redirect=${Math.floor(now.getTime() / 1000)}`;
                     })()}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -1706,31 +1734,6 @@ const ScheduleTable = memo(function ScheduleTable({
                 departed && !isNext && "text-zinc-400"
               )}>
                 {(() => {
-                  // Calculate from scraped estimated times if both departure and arrival are available
-                  if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
-                    const parseTime = (t: string) => {
-                      const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-                      if (!match) return 0;
-                      let h = parseInt(match[1], 10);
-                      const m = parseInt(match[2], 10);
-                      if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-                      if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
-                      return h * 60 + m;
-                    };
-                    
-                    const depMins = parseTime(scrapedEstimate.predicted_departure);
-                    const arrMins = parseTime(scrapedEstimate.predicted_arrival);
-                    let estimatedDur = arrMins - depMins;
-                    
-                    // Handle overnight trains (e.g. 11 PM to 12 AM)
-                    if (estimatedDur < 0) {
-                      estimatedDur += 24 * 60;
-                    }
-                    
-                    if (estimatedDur > 0 && estimatedDur !== duration) {
-                      return <span>{estimatedDur}m</span>;
-                    }
-                  }
                   return <span>{duration}m</span>;
                 })()}
               </div>
