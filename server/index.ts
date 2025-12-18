@@ -570,35 +570,43 @@ async function startServer() {
 
     // Fetch crowding data from Metra's website
     app.get("/api/crowding", async (req, res) => {
-      console.log(`[API] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
+      const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const startTime = Date.now();
+      console.log(`[API] [${requestId}] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
+      console.log(`[API] [${requestId}] Railway env check - NODE_ENV: ${process.env.NODE_ENV}, PORT: ${process.env.PORT}`);
       
       // Set a timeout for the response (60 seconds should be enough for scraping)
+      // Railway has a 60s request timeout, so we set ours slightly lower
       const timeout = setTimeout(() => {
         if (!res.headersSent) {
-          console.error(`[API TIMEOUT] Request timed out for ${req.query.origin}->${req.query.destination}`);
+          const elapsed = Date.now() - startTime;
+          console.error(`[API TIMEOUT] [${requestId}] Request timed out after ${elapsed}ms for ${req.query.origin}->${req.query.destination}`);
           try {
             res.status(504).json({ 
               error: 'Request timeout', 
-              crowding: [] 
+              crowding: [],
+              requestId 
             });
           } catch (timeoutError: any) {
-            console.error(`[API TIMEOUT ERROR] Failed to send timeout response: ${timeoutError.message}`);
+            console.error(`[API TIMEOUT ERROR] [${requestId}] Failed to send timeout response: ${timeoutError.message}`);
           }
         }
-      }, 60000);
+      }, 55000); // 55 seconds to avoid Railway's 60s timeout
       
       // Clear timeout when response is sent
       const clearTimeoutAndSend = (data: any) => {
         clearTimeout(timeout);
+        const elapsed = Date.now() - startTime;
         if (!res.headersSent) {
           try {
-            return res.json(data);
+            console.log(`[API] [${requestId}] Sending response after ${elapsed}ms (${data?.crowding?.length || 0} entries)`);
+            return res.json({ ...data, requestId, responseTime: elapsed });
           } catch (sendError: any) {
-            console.error(`[API SEND ERROR] Failed to send response: ${sendError.message}`);
+            console.error(`[API SEND ERROR] [${requestId}] Failed to send response after ${elapsed}ms: ${sendError.message}`);
             return;
           }
         } else {
-          console.warn(`[API WARNING] Response already sent for ${req.query.origin}->${req.query.destination}`);
+          console.warn(`[API WARNING] [${requestId}] Response already sent after ${elapsed}ms for ${req.query.origin}->${req.query.destination}`);
         }
       };
       
@@ -1149,15 +1157,16 @@ async function startServer() {
         scrapingLocks.set(cacheKey, scrapePromise);
         
         try {
-          console.log(`[API] Waiting for scraping promise to complete for ${origin}->${destination}...`);
+          console.log(`[API] [${requestId}] Waiting for scraping promise to complete for ${origin}->${destination}...`);
           const result = await scrapePromise;
-          console.log(`[API] Scraping completed for ${origin}->${destination}, result has ${result?.crowding?.length || 0} entries`);
+          console.log(`[API] [${requestId}] Scraping completed for ${origin}->${destination}, result has ${result?.crowding?.length || 0} entries`);
           scrapingLocks.delete(cacheKey);
-          console.log(`[API] Sending JSON response for ${origin}->${destination}...`);
+          console.log(`[API] [${requestId}] Sending JSON response for ${origin}->${destination}...`);
           return clearTimeoutAndSend(result);
         } catch (scrapeError: any) {
-          console.error(`[API ERROR] Scraping failed for ${origin}->${destination}: ${scrapeError.message}`);
-          console.error(`[API ERROR] Stack: ${scrapeError.stack}`);
+          const elapsed = Date.now() - startTime;
+          console.error(`[API ERROR] [${requestId}] Scraping failed after ${elapsed}ms for ${origin}->${destination}: ${scrapeError.message}`);
+          console.error(`[API ERROR] [${requestId}] Stack: ${scrapeError.stack}`);
           scrapingLocks.delete(cacheKey);
           
           const isDetachmentError = scrapeError.message.includes('detached') || 
@@ -1183,12 +1192,15 @@ async function startServer() {
           return clearTimeoutAndSend({ crowding: [] });
         }
       } catch (error: any) {
-        console.error(`[API ERROR] Error fetching crowding data for ${origin}->${destination}:`, error.message);
-        console.error(`[API ERROR] Stack: ${error.stack}`);
-        return clearTimeoutAndSend({ crowding: [] });
+        const elapsed = Date.now() - startTime;
+        console.error(`[API ERROR] [${requestId}] Error fetching crowding data after ${elapsed}ms for ${origin}->${destination}:`, error.message);
+        console.error(`[API ERROR] [${requestId}] Stack: ${error.stack}`);
+        return clearTimeoutAndSend({ crowding: [], error: error.message, requestId });
       } finally {
         // Ensure timeout is cleared
         clearTimeout(timeout);
+        const elapsed = Date.now() - startTime;
+        console.log(`[API] [${requestId}] Request completed in ${elapsed}ms`);
       }
     });
 

@@ -260,7 +260,11 @@ export default function Schedule() {
 
   // Initialize day type based on current service day
   useEffect(() => {
-    setDayType(getServiceDayType(getChicagoTime()));
+    const chicagoTime = getChicagoTime();
+    const serviceDayType = getServiceDayType(chicagoTime);
+    const currentMinutes = getCurrentMinutesInChicago();
+    console.debug(`[Schedule] Initializing: Chicago time: ${chicagoTime.toLocaleString()}, serviceDayType: ${serviceDayType}, currentMinutes: ${currentMinutes} (${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')})`);
+    setDayType(serviceDayType);
   }, []);
 
   // Update current time every 15 seconds
@@ -270,8 +274,10 @@ export default function Schedule() {
       setCurrentTime(now);
       
       const currentServiceDay = getServiceDayType(now);
+      const currentMinutes = getCurrentMinutesInChicago();
       setDayType(prev => {
         if (prev !== currentServiceDay) {
+          console.debug(`[Schedule] Day type changed: ${prev} -> ${currentServiceDay} at ${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')}`);
           return currentServiceDay;
         }
         return prev;
@@ -771,6 +777,13 @@ export default function Schedule() {
     const currentMinutes = getCurrentMinutesInChicago();
     const currentSchedule = scheduleData[dayType];
     const trains = direction === 'inbound' ? currentSchedule.inbound : currentSchedule.outbound;
+    
+    // DEBUG: Log current state
+    const currentTimeStr = `${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')}`;
+    console.debug(`[computedNextTrain] Current time: ${currentTimeStr} (${currentMinutes} min), dayType: ${dayType}, direction: ${direction}, trains: ${trains.length}`);
+    if (trains.length > 0) {
+      console.debug(`[computedNextTrain] First 5 trains:`, trains.slice(0, 5).map(t => `${t.departureTime} (${t.id})`));
+    }
     
     if (trains.length === 0) {
       return null;
@@ -1561,6 +1574,11 @@ const ScheduleTable = memo(function ScheduleTable({
   const hasDeparted = (departureTime: string, currentMinutesValue: number): boolean => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
     
+    // DEBUG: Log the first few calls to understand what's happening
+    if (Math.random() < 0.01) { // Log 1% of calls to avoid spam
+      console.debug(`[hasDeparted] Checking: ${departureTime} (${depHours}:${depMinutes}) vs current: ${currentMinutesValue} (${Math.floor(currentMinutesValue/60)}:${currentMinutesValue%60})`);
+    }
+    
     // Service day boundary: 1 AM (60 minutes into the day)
     // Trains with departure times from 24:00-25:59 in GTFS are overnight trains
     const SERVICE_DAY_START = 60; // 1:00 AM
@@ -1581,7 +1599,11 @@ const ScheduleTable = memo(function ScheduleTable({
       const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
       
       if (currentMinutesValue < EARLY_MORNING_CUTOFF) {
-        return normalizedMinutes < currentMinutesValue;
+        const result = normalizedMinutes < currentMinutesValue;
+        if (Math.random() < 0.01) {
+          console.debug(`[hasDeparted] Overnight train (${departureTime} -> ${normalizedHours}:${depMinutes}) in early morning: ${result ? 'DEPARTED' : 'UPCOMING'}`);
+        }
+        return result;
       }
       
       // Otherwise, if we are later in the day (4 AM - 23:59)
@@ -1595,9 +1617,16 @@ const ScheduleTable = memo(function ScheduleTable({
     if (isBeforeServiceDayStart) {
       // If train is between midnight and 1 AM, check if it's passed
       if (depTotalMinutes < SERVICE_DAY_START) {
-        return depTotalMinutes < currentMinutesValue;
+        const result = depTotalMinutes < currentMinutesValue;
+        if (Math.random() < 0.01) {
+          console.debug(`[hasDeparted] Before service day start: ${departureTime} (${depTotalMinutes}) vs ${currentMinutesValue}: ${result ? 'DEPARTED' : 'UPCOMING'}`);
+        }
+        return result;
       }
       // Trains after 1 AM are all departed (from yesterday)
+      if (Math.random() < 0.01) {
+        console.debug(`[hasDeparted] Before service day start, train after 1 AM (${departureTime}): DEPARTED (yesterday's train)`);
+      }
       return true;
     }
     
@@ -1605,11 +1634,18 @@ const ScheduleTable = memo(function ScheduleTable({
     // (midnight to 1 AM) are TOMORROW's trains, not today's departed trains
     if (isLateNight && depTotalMinutes < OVERNIGHT_CUTOFF) {
       // This is an overnight train for tonight/tomorrow - NOT departed yet
+      if (Math.random() < 0.01) {
+        console.debug(`[hasDeparted] Late night, early morning train (${departureTime}): UPCOMING (tomorrow's train)`);
+      }
       return false;
     }
     
     // Regular comparison: departed if train time is before current time
-    return depTotalMinutes < currentMinutesValue;
+    const result = depTotalMinutes < currentMinutesValue;
+    if (Math.random() < 0.01) {
+      console.debug(`[hasDeparted] Regular comparison: ${departureTime} (${depTotalMinutes}) vs ${currentMinutesValue}: ${result ? 'DEPARTED' : 'UPCOMING'}`);
+    }
+    return result;
   };
 
   const getMinutesUntilDeparture = (departureTime: string, currentMinutesValue: number): number | null => {
