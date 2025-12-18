@@ -1081,28 +1081,88 @@ export default function Schedule() {
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
                     <span>Arrives</span>
-                    <span className={cn(
-                      "font-semibold",
-                      delayMinutes && delayMinutes > 0 ? "text-red-600" : ""
-                    )}>
-                      {predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival ? (
-                        <>
-                          <span className="line-through text-zinc-400 mr-1">{scheduledArrival}</span>
-                          <span className="text-red-600">{predictedArrival}</span>
-                        </>
-                      ) : (
-                        predictedArrival || formatTime(nextTrain.arrivalTime)
-                      )}
-                    </span>
+                    {(() => {
+                      // Check scraped estimated arrival first
+                      if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
+                        const sched = scrapedEstimate.scheduled_arrival;
+                        const pred = scrapedEstimate.predicted_arrival;
+                        
+                        // Parse times to calculate difference
+                        const parseTime = (t: string) => {
+                          const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                          if (!match) return 0;
+                          let h = parseInt(match[1], 10);
+                          const m = parseInt(match[2], 10);
+                          if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                          if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                          return h * 60 + m;
+                        };
+                        
+                        const schedMins = parseTime(sched);
+                        const predMins = parseTime(pred);
+                        const diffMins = predMins - schedMins;
+                        
+                        if (diffMins !== 0) {
+                          const isLate = diffMins > 0;
+                          return (
+                            <span className={cn("font-semibold", isLate ? "text-rose-600" : "text-emerald-600")}>
+                              {pred}{' '}
+                              <span className="text-xs">({isLate ? '+' : ''}{diffMins}min)</span>
+                            </span>
+                          );
+                        }
+                      }
+                      
+                      // Fallback to real-time API prediction
+                      if (predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival) {
+                        return (
+                          <span className="font-semibold text-rose-600">
+                            {predictedArrival}
+                          </span>
+                        );
+                      }
+                      
+                      return <span className="font-semibold">{predictedArrival || formatTime(nextTrain.arrivalTime)}</span>;
+                    })()}
                   </div>
                   <span className="text-zinc-400">•</span>
-                  <span>{duration} min trip</span>
-                  {delayMinutes && delayMinutes > 0 && (
-                    <>
-                      <span className="text-zinc-400">•</span>
-                      <span className="text-red-600 font-medium">+{delayMinutes}m delay</span>
-                    </>
-                  )}
+                  {(() => {
+                    // Calculate adjusted duration if there's a delay
+                    if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
+                      const parseTime = (t: string) => {
+                        const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                        if (!match) return 0;
+                        let h = parseInt(match[1], 10);
+                        const m = parseInt(match[2], 10);
+                        if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                        if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                        return h * 60 + m;
+                      };
+                      
+                      const schedDepMins = scrapedEstimate.scheduled_departure 
+                        ? parseTime(scrapedEstimate.scheduled_departure) 
+                        : 0;
+                      const predDepMins = parseTime(scrapedEstimate.predicted_departure);
+                      const predArrMins = parseTime(scrapedEstimate.predicted_arrival);
+                      
+                      // Calculate actual trip duration from estimated times
+                      const actualDuration = predArrMins - predDepMins;
+                      const diffMins = predDepMins - schedDepMins; // Departure delay
+                      
+                      if (diffMins !== 0 && actualDuration > 0) {
+                        const isLate = diffMins > 0;
+                        return (
+                          <span className={cn("font-medium", isLate ? "text-rose-600" : "text-emerald-600")}>
+                            {actualDuration} min{' '}
+                            <span className="text-xs">({isLate ? '+' : ''}{diffMins}min)</span>
+                          </span>
+                        );
+                      }
+                    }
+                    
+                    // Default duration
+                    return <span>{duration} min trip</span>;
+                  })()}
                   <a 
                     href={(() => {
                       const now = new Date();
