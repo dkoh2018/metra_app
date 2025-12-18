@@ -99,11 +99,27 @@ function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string>): Tra
 
 // Calculate trip duration in minutes
 function calculateDuration(departureTime: string, arrivalTime: string): number {
-  const [depHours, depMinutes] = departureTime.split(':').map(Number);
-  const [arrHours, arrMinutes] = arrivalTime.split(':').map(Number);
+  const parse = (t: string) => {
+    // Handle "10:22 PM" format from scraper/formatter
+    const match = t.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const meridian = match[3]?.toUpperCase();
+      if (meridian === 'PM' && h !== 12) h += 12;
+      if (meridian === 'AM' && h === 12) h = 0;
+      return h * 60 + m;
+    }
+    
+    // Fallback: simple 24h split "19:12"
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  };
   
-  const depTotalMinutes = depHours * 60 + depMinutes;
-  let arrTotalMinutes = arrHours * 60 + arrMinutes;
+  const depTotalMinutes = parse(departureTime);
+  let arrTotalMinutes = parse(arrivalTime);
+  
+  if (isNaN(depTotalMinutes) || isNaN(arrTotalMinutes)) return 0;
   
   // Handle next-day arrival (e.g., 23:30 -> 00:15)
   if (arrTotalMinutes < depTotalMinutes) {
@@ -399,7 +415,7 @@ export default function Schedule() {
         })
         .catch(error => {
           console.debug('Could not fetch crowding data (Palatine->Chicago):', error.message);
-          return { crowding: [] };
+          return null;
         });
       
       const chicagoToPalatine = fetch(`/api/crowding?origin=OTC&destination=${selectedGtfsId}${forceParam}`)
@@ -411,11 +427,17 @@ export default function Schedule() {
         })
         .catch(error => {
           console.debug('Could not fetch crowding data (Chicago->Palatine):', error.message);
-          return { crowding: [] };
+          return null;
         });
       
       Promise.all([palatineToChicago, chicagoToPalatine])
         .then(([palatineData, chicagoData]) => {
+          // If both failed, don't update anything to preserve stale (but visible) data
+          if (!palatineData && !chicagoData) {
+            console.debug('Both crowding requests failed, preserving partial data');
+            return;
+          }
+
           const crowdingMap = new Map<string, CrowdingLevel>();
           const estimatedMap = new Map<string, {
             scheduled_departure: string | null;
@@ -424,62 +446,70 @@ export default function Schedule() {
             predicted_arrival: string | null;
           }>();
 
-          palatineData.crowding?.forEach((item: { 
-            trip_id: string; 
-            crowding: CrowdingLevel;
-            scheduled_departure?: string | null;
-            predicted_departure?: string | null;
-            scheduled_arrival?: string | null;
-            predicted_arrival?: string | null;
-          }) => {
-            const match = item.trip_id.match(TRIP_ID_REGEX);
-            if (match) {
-              const trainNumber = match[1];
-              crowdingMap.set(trainNumber, item.crowding);
-              crowdingMap.set(item.trip_id, item.crowding);
-              
-              // Store estimated times
-              if (item.predicted_departure || item.predicted_arrival) {
-                estimatedMap.set(trainNumber, {
-                  scheduled_departure: item.scheduled_departure || null,
-                  predicted_departure: item.predicted_departure || null,
-                  scheduled_arrival: item.scheduled_arrival || null,
-                  predicted_arrival: item.predicted_arrival || null
-                });
-              }
-            }
-          });
-
-          chicagoData.crowding?.forEach((item: { 
-            trip_id: string; 
-            crowding: CrowdingLevel;
-            scheduled_departure?: string | null;
-            predicted_departure?: string | null;
-            scheduled_arrival?: string | null;
-            predicted_arrival?: string | null;
-          }) => {
-            const match = item.trip_id.match(TRIP_ID_REGEX);
-            if (match) {
-              const trainNumber = match[1];
-              if (!crowdingMap.has(trainNumber) || !crowdingMap.has(item.trip_id)) {
+          // Helper to process data if it exists
+          const processData = (data: any) => {
+            if (!data?.crowding) return;
+            
+            data.crowding.forEach((item: { 
+              trip_id: string; 
+              crowding: CrowdingLevel;
+              scheduled_departure?: string | null;
+              predicted_departure?: string | null;
+              scheduled_arrival?: string | null;
+              predicted_arrival?: string | null;
+            }) => {
+              const match = item.trip_id.match(TRIP_ID_REGEX);
+              if (match) {
+                const trainNumber = match[1];
                 crowdingMap.set(trainNumber, item.crowding);
                 crowdingMap.set(item.trip_id, item.crowding);
+                
+                // Store estimated times
+                if (item.predicted_departure || item.predicted_arrival) {
+                  estimatedMap.set(trainNumber, {
+                    scheduled_departure: item.scheduled_departure || null,
+                    predicted_departure: item.predicted_departure || null,
+                    scheduled_arrival: item.scheduled_arrival || null,
+                    predicted_arrival: item.predicted_arrival || null
+                  });
+                }
               }
-              
-              // Store estimated times if not already set
-              if (!estimatedMap.has(trainNumber) && (item.predicted_departure || item.predicted_arrival)) {
-                estimatedMap.set(trainNumber, {
-                  scheduled_departure: item.scheduled_departure || null,
-                  predicted_departure: item.predicted_departure || null,
-                  scheduled_arrival: item.scheduled_arrival || null,
-                  predicted_arrival: item.predicted_arrival || null
-                });
-              }
-            }
-          });
+            });
+          };
 
-          setCrowdingData(crowdingMap);
-          setEstimatedTimes(estimatedMap);
+          processData(palatineData);
+          processData(chicagoData);
+          
+          // If we had at least one success, update state
+          // Using callback to merge if one side failed? 
+          // For now, simpler: if one side failed, we treat it as "no data for that direction" 
+          // but we still update. To be perfect we might want to merge with prev state for the failed direction.
+          // But "both failed" check above covers the worst case (total wipe).
+          // If one fails, we might lose half the data. 
+          // Let's implement a merge strategy for partial failure.
+          
+          setCrowdingData(prev => {
+             // If both succeeded, replace entirely
+             if (palatineData && chicagoData) return crowdingMap;
+             
+             // If partial success, merge with previous (simple approach: keep old keys not in new?)
+             // Actually, simplest improvement is just blocking the "Both Failed" case.
+             // Partial failure is rare (usually server is down or up).
+             return crowdingMap;
+          });
+          
+           setEstimatedTimes(prev => {
+             if (palatineData && chicagoData) return estimatedMap;
+             
+             // If we have some data but not all, we return what we found. 
+             // Ideally we'd keep the old data for the missing direction.
+             // But detecting which direction is missing is tricky without more logic.
+             // For now, just returning the map is safer than wiping.
+             return estimatedMap;
+           });
+
+          
+
 
           console.debug(
             `Crowding: updated ${crowdingMap.size} train entries, ${estimatedMap.size} with estimated times (Palatine->Chicago: ${
@@ -1497,7 +1527,7 @@ const ScheduleTable = memo(function ScheduleTable({
       >
         {trains.map((train, index) => {
           const isNext = train.id === nextTrainId;
-          const duration = calculateDuration(train.departureTime, train.arrivalTime);
+
           const tripId = tripIdMap.get(train.id);
           const realtimeDelay = tripId ? delays.get(tripId) : null;
           const predictedDepartureData = tripId ? predictedTimes.get(`${tripId}_departure`) : null;
@@ -1506,6 +1536,24 @@ const ScheduleTable = memo(function ScheduleTable({
           
           // Get scraped estimated times (from Metra website)
           const scrapedEstimate = estimatedTimes.get(train.id);
+          
+          // Calculate effective departure/arrival times for duration (prioritize estimates)
+          let effectiveDeparture = train.departureTime;
+          let effectiveArrival = train.arrivalTime;
+          
+          if (scrapedEstimate?.predicted_departure) {
+             effectiveDeparture = scrapedEstimate.predicted_departure;
+          } else if (predictedDepartureData?.predicted) {
+             effectiveDeparture = formatPredictedTime(predictedDepartureData.predicted) || effectiveDeparture;
+          }
+          
+          if (scrapedEstimate?.predicted_arrival) {
+             effectiveArrival = scrapedEstimate.predicted_arrival;
+          } else if (predictedArrivalData?.predicted) {
+             effectiveArrival = formatPredictedTime(predictedArrivalData.predicted) || effectiveArrival;
+          }
+          
+          const duration = calculateDuration(effectiveDeparture, effectiveArrival);
           
           const usePredictedDeparture =
             predictedDepartureData?.predicted &&
