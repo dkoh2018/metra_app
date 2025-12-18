@@ -136,7 +136,7 @@ export function initDatabase(): Database.Database {
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='crowding_cache'"
   ).get() as { sql?: string } | undefined;
 
-  if (existingCrowdingTable?.sql && !existingCrowdingTable.sql.includes("'some'")) {
+  if (existingCrowdingTable?.sql && (!existingCrowdingTable.sql.includes("'some'") || !existingCrowdingTable.sql.includes("predicted_departure"))) {
     db.exec("DROP TABLE IF EXISTS crowding_cache");
   }
 
