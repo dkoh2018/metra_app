@@ -40,10 +40,10 @@ interface ApiAlerts {
 const TRIP_ID_REGEX = /UNW(\d+)/;
 const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
 const CROWDING_BADGE_STYLES: Record<CrowdingLevel, string> = {
-  low: "bg-green-100 text-green-700",
+  low: "bg-green-100 text-emerald-600 font-semibold",
   some: "bg-amber-200 text-amber-800",
   moderate: "bg-orange-100 text-orange-700",
-  high: "bg-red-100 text-red-700"
+  high: "bg-red-100 text-rose-600 font-semibold"
 };
 const CROWDING_DOT_STYLES: Record<CrowdingLevel, string> = {
   low: "bg-green-600",
@@ -984,8 +984,8 @@ export default function Schedule() {
                     <div className={cn(
                       "text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums tracking-tight text-zinc-900",
                       delayMinutes && delayMinutes > 0 ? "text-red-600" : "",
-                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure > (scrapedEstimate.scheduled_departure || "") ? "text-red-700" : "",
-                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure < (scrapedEstimate.scheduled_departure || "") ? "text-green-700" : ""
+                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure > (scrapedEstimate.scheduled_departure || "") ? "text-rose-600 font-semibold" : "",
+                      scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure < (scrapedEstimate.scheduled_departure || "") ? "text-emerald-600 font-semibold" : ""
                     )}>
                       {(() => {
                         // Priority 1: Use scraped estimated departure if available
@@ -998,7 +998,7 @@ export default function Schedule() {
                             return (
                               <>
                                 <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{sched}</span>
-                                <span className={isDelayed ? "text-red-700" : "text-green-700"}>{pred}</span>
+                                <span className={isDelayed ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>{pred}</span>
                               </>
                             );
                           }
@@ -1435,7 +1435,7 @@ const ScheduleTable = memo(function ScheduleTable({
                     const isDelayed = pred > sched;
                     const isEarly = pred < sched;
                     return (
-                      <span className={isDelayed ? "text-red-700" : isEarly ? "text-green-700" : ""}>
+                      <span className={isDelayed ? "text-rose-600 font-semibold" : isEarly ? "text-emerald-600 font-semibold" : ""}>
                         {pred}
                       </span>
                     );
@@ -1465,7 +1465,7 @@ const ScheduleTable = memo(function ScheduleTable({
                     const isDelayed = pred > sched;
                     const isEarly = pred < sched;
                     return (
-                      <span className={isDelayed ? "text-red-700" : isEarly ? "text-green-700" : ""}>
+                      <span className={isDelayed ? "text-rose-600 font-semibold" : isEarly ? "text-emerald-600 font-semibold" : ""}>
                         {pred}
                       </span>
                     );
