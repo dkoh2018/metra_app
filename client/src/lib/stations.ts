@@ -9,6 +9,7 @@ export interface Station {
 }
 
 export const STATIONS: Record<string, Station> = {
+  /* Restricting to Palatine only as per user request
   harvard: { lat: 42.4197222, lng: -88.6175000, name: 'Harvard', isTerminal: true, gtfsId: 'HARVARD' },
   woodstock: { lat: 42.3169444, lng: -88.4475000, name: 'Woodstock', gtfsId: 'WOODSTOCK' },
   // McHenry removed as per user request
@@ -17,7 +18,9 @@ export const STATIONS: Record<string, Station> = {
   cary: { lat: 42.2088889, lng: -88.2413889, name: 'Cary', gtfsId: 'CARY' },
   foxRiverGrove: { lat: 42.1977778, lng: -88.2194444, name: 'Fox River Grove', gtfsId: 'FOXRG' },
   barrington: { lat: 42.1527778, lng: -88.1319444, name: 'Barrington', gtfsId: 'BARRINGTON' },
+  */
   palatine: { lat: 42.1130556, lng: -88.0483333, name: 'Palatine', isHighlight: true, gtfsId: 'PALATINE' },
+  /*
   arlingtonPark: { lat: 42.0952778, lng: -88.0091667, name: 'Arlington Park', gtfsId: 'ARLINGTNPK' },
   arlingtonHeights: { lat: 42.0841667, lng: -87.9836111, name: 'Arlington Heights', gtfsId: 'ARLINGTNHT' },
   mtProspect: { lat: 42.0630556, lng: -87.9361111, name: 'Mt. Prospect', gtfsId: 'MTPROSPECT' },
@@ -31,5 +34,6 @@ export const STATIONS: Record<string, Station> = {
   jeffersonPark: { lat: 41.9713889, lng: -87.7633333, name: 'Jefferson Park', gtfsId: 'JEFFERSONP' },
   irvingPark: { lat: 41.9525000, lng: -87.7297222, name: 'Irving Park', gtfsId: 'IRVINGPK' },
   clybourn: { lat: 41.9169444, lng: -87.6680556, name: 'Clybourn', gtfsId: 'CLYBOURN' },
+  */
   ogilvie: { lat: 41.8822222, lng: -87.6405556, name: 'Ogilvie Transportation Center', isTerminal: true, gtfsId: 'OTC' },
 };
