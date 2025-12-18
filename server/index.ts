@@ -659,10 +659,20 @@ async function startServer() {
                 const tripId = row.getAttribute('id');
                 if (!tripId) return;
                 
-                const crowdingSome = row.querySelector('.trip--crowding-some');
-                const crowdingModerate = row.querySelector('.trip--crowding-moderate');
-                const crowdingHigh = row.querySelector('.trip--crowding-high');
-                const genericCrowding = row.querySelector('.trip--crowding');
+                // Crowding is stored in a nested span inside .trip--crowding container
+                // Classes: trip--crowding-low, trip--crowding-some, trip--crowding-moderate, trip--crowding-high
+                const crowdingContainer = row.querySelector('.trip--crowding');
+                if (!crowdingContainer) return;
+                
+                // Check for crowding classes on both the container and nested spans
+                const crowdingLow = crowdingContainer.querySelector('.trip--crowding-low') || 
+                                    crowdingContainer.classList.contains('trip--crowding-low');
+                const crowdingSome = crowdingContainer.querySelector('.trip--crowding-some') ||
+                                     crowdingContainer.classList.contains('trip--crowding-some');
+                const crowdingModerate = crowdingContainer.querySelector('.trip--crowding-moderate') ||
+                                         crowdingContainer.classList.contains('trip--crowding-moderate');
+                const crowdingHigh = crowdingContainer.querySelector('.trip--crowding-high') ||
+                                     crowdingContainer.classList.contains('trip--crowding-high');
 
                 let crowding: CrowdingLevel | null = null;
                 if (crowdingHigh) {
@@ -671,7 +681,10 @@ async function startServer() {
                   crowding = 'moderate';
                 } else if (crowdingSome) {
                   crowding = 'some';
-                } else if (genericCrowding) {
+                } else if (crowdingLow) {
+                  crowding = 'low';
+                } else {
+                  // Fallback: if container exists but no specific level, assume low
                   crowding = 'low';
                 }
                 
