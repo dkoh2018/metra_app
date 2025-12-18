@@ -794,7 +794,17 @@ export default function Schedule() {
       // Treat it as "tomorrow" (add 24 hours)
       const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM
       const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
+      const SERVICE_DAY_START = 60; // 1:00 AM
       
+      // Special handling for early morning (before 1 AM)
+      // At 12:08 AM, trains from 1 AM onwards are TODAY's trains, not tomorrow's
+      if (currentMinutesValue < SERVICE_DAY_START) {
+        // We're in early morning (00:00 - 00:59)
+        // All trains from current time onwards are today, no day offset needed
+        return trainMinutes;
+      }
+      
+      // Normal late night handling: if viewing late at night and train is early morning
       if (currentMinutesValue >= LATE_NIGHT_THRESHOLD && trainMinutes < EARLY_MORNING_CUTOFF) {
         // This is an overnight train for tonight/tomorrow - add day offset
         trainMinutes += 24 * 60;
@@ -825,9 +835,16 @@ export default function Schedule() {
           // Handle overnight for estimated times too (if estimated time is early morning when viewing late at night)
           const LATE_NIGHT_THRESHOLD = 18 * 60;
           const EARLY_MORNING_CUTOFF = 4 * 60;
+          const SERVICE_DAY_START = 60; // 1:00 AM
           let adjustedEstimatedMinutes = estimatedMinutes;
           
-          if (currentMinutes >= LATE_NIGHT_THRESHOLD && estimatedMinutes < EARLY_MORNING_CUTOFF) {
+          // Special handling for early morning (before 1 AM)
+          // At 12:08 AM, trains from 1 AM onwards are TODAY's trains, not tomorrow's
+          if (currentMinutes < SERVICE_DAY_START) {
+            // We're in early morning (00:00 - 00:59), all trains are today
+            adjustedEstimatedMinutes = estimatedMinutes;
+          } else if (currentMinutes >= LATE_NIGHT_THRESHOLD && estimatedMinutes < EARLY_MORNING_CUTOFF) {
+            // Late night viewing, early morning train = tomorrow
             adjustedEstimatedMinutes += 24 * 60;
           }
           
@@ -1566,6 +1583,7 @@ const ScheduleTable = memo(function ScheduleTable({
     const SERVICE_DAY_START = 60; // 1:00 AM
     const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM - after this, early morning trains are "tomorrow"
     const OVERNIGHT_CUTOFF = 1 * 60; // 1:00 AM - trains before this are "tonight's late" trains
+    const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
     
     const isBeforeServiceDayStart = currentMinutesValue < SERVICE_DAY_START;
     const isLateNight = currentMinutesValue >= LATE_NIGHT_THRESHOLD; // After 6 PM
@@ -1578,8 +1596,6 @@ const ScheduleTable = memo(function ScheduleTable({
       
       // If we are in the early morning (00:00 - 04:00)
       // Then we can compare directly as we are effectively in the "same" extended day
-      const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
-      
       if (currentMinutesValue < EARLY_MORNING_CUTOFF) {
         return normalizedMinutes < currentMinutesValue;
       }
@@ -1591,14 +1607,18 @@ const ScheduleTable = memo(function ScheduleTable({
     
     const depTotalMinutes = depHours * 60 + depMinutes;
     
-    // Before 1 AM: we're still on yesterday's service day
+    // Before 1 AM (00:00 - 00:59): we're in the early morning of the current day
+    // At this time, we should show:
+    // - Trains that already departed (00:00 to current time) as "Gone"
+    // - Trains later today (current time to 23:59) as upcoming
+    // - Early morning trains (1 AM - 4 AM) are TODAY's trains, not yesterday's!
     if (isBeforeServiceDayStart) {
-      // If train is between midnight and 1 AM, check if it's passed
-      if (depTotalMinutes < SERVICE_DAY_START) {
-        return depTotalMinutes < currentMinutesValue;
+      // If train is between midnight and current time, it's departed
+      if (depTotalMinutes < currentMinutesValue) {
+        return true;
       }
-      // Trains after 1 AM are all departed (from yesterday)
-      return true;
+      // All other trains (current time onwards, including 1 AM+) are upcoming
+      return false;
     }
     
     // Key fix: When viewing late at night (after 6 PM), early morning trains 
