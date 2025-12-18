@@ -771,8 +771,8 @@ export default function Schedule() {
             </button>
 
             {/* Center: Branding - Palatine */}
-            <div className="flex-1 text-center">
-              <span className="text-sm sm:text-base font-bold text-zinc-500 uppercase tracking-[0.15em]">
+            <div className="flex-1 text-center py-1 flex items-center justify-center">
+              <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">
                 Palatine
               </span>
             </div>
@@ -783,7 +783,7 @@ export default function Schedule() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
               </span>
-              <span className="text-[10px] font-medium font-mono">
+              <span className="text-xs font-medium font-mono">
                 {lastUpdate ? (() => {
                   const date = lastUpdate.includes('T') ? new Date(lastUpdate) : new Date(lastUpdate.replace(' ', 'T') + 'Z');
                   return formatChicagoTime(date, { hour: 'numeric', minute: '2-digit' });
@@ -903,7 +903,7 @@ export default function Schedule() {
                     {direction === 'inbound' ? 'Inbound' : 'Outbound'}
                   </span>
                   <ArrowRight className="w-3 h-3" />
-                  <span>{direction === 'inbound' ? 'Chicago' : 'Palatine'}</span>
+                  <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">{direction === 'inbound' ? 'Chicago' : 'Palatine'}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {crowdingLevel && (

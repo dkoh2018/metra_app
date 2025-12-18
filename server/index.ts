@@ -23,11 +23,19 @@ const DEFAULT_PUPPETEER_CACHE =
   process.env.PUPPETEER_CACHE_DIR || path.join(process.cwd(), ".cache", "puppeteer");
 
 let chromeExecutablePath: string | null = null;
-let chromeInstallPromise: Promise<string> | null = null;
+let chromeInstallPromise: Promise<string | null> | null = null;
 
-async function ensureChromeExecutable(): Promise<string> {
+// Track if Chrome is available (null = not checked yet, false = unavailable)
+let chromeAvailable: boolean | null = null;
+
+async function ensureChromeExecutable(): Promise<string | null> {
   if (chromeExecutablePath && fs.existsSync(chromeExecutablePath)) {
     return chromeExecutablePath;
+  }
+
+  // If we already checked and Chrome is not available, don't retry
+  if (chromeAvailable === false) {
+    return null;
   }
 
   if (chromeInstallPromise) {
@@ -35,30 +43,63 @@ async function ensureChromeExecutable(): Promise<string> {
   }
 
   chromeInstallPromise = (async () => {
+    // Try system Chrome paths first (faster and more reliable)
+    const systemChromePaths = [
+      // macOS
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      // Linux (including Render.com)
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      // Render.com specific
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+    ].filter(Boolean) as string[];
+
+    for (const chromePath of systemChromePaths) {
+      if (fs.existsSync(chromePath)) {
+        console.log(`✅ Using system Chrome at: ${chromePath}`);
+        chromeExecutablePath = chromePath;
+        chromeAvailable = true;
+        return chromePath;
+      }
+    }
+
+    // Fall back to downloading Chrome via @puppeteer/browsers
+    console.log("No system Chrome found, attempting to download...");
     const cacheDir = path.resolve(DEFAULT_PUPPETEER_CACHE);
     if (!fs.existsSync(cacheDir)) {
       fs.mkdirSync(cacheDir, { recursive: true });
     }
 
-    const buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
-    const executablePath = computeExecutablePath({
-      browser: Browser.CHROME,
-      buildId,
-      cacheDir
-    });
-
-    if (!fs.existsSync(executablePath)) {
-      console.log(`Downloading Chrome (${buildId}) to ${cacheDir}...`);
-      await install({
+    try {
+      const buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
+      const executablePath = computeExecutablePath({
         browser: Browser.CHROME,
         buildId,
-        cacheDir,
-        unpack: true
+        cacheDir
       });
-    }
 
-    chromeExecutablePath = executablePath;
-    return executablePath;
+      if (!fs.existsSync(executablePath)) {
+        console.log(`Downloading Chrome (${buildId}) to ${cacheDir}...`);
+        await install({
+          browser: Browser.CHROME,
+          buildId,
+          cacheDir,
+          unpack: true
+        });
+      }
+
+      chromeExecutablePath = executablePath;
+      chromeAvailable = true;
+      return executablePath;
+    } catch (resolveError: any) {
+      console.warn("⚠️  Chrome not available - crowding data will be disabled");
+      console.warn("   Reason:", resolveError.message);
+      chromeAvailable = false;
+      return null;
+    }
   })();
 
   try {
@@ -535,6 +576,11 @@ async function startServer() {
           try {
             const puppeteer = (await import("puppeteer")).default;
             const executablePath = await ensureChromeExecutable();
+            
+            // If Chrome is not available, throw to trigger fallback
+            if (!executablePath) {
+              throw new Error("Chrome not available - crowding scraping disabled");
+            }
             
             let firstTrainTimestamp: number;
 
