@@ -770,9 +770,9 @@ async function startServer() {
                 const tripId = tripIdMatch[1];
                 
                 // Determine if this is departure (origin) or arrival (dest) based on cell ID
-                // Use the actual origin/dest passed from the scraper
-                const isOriginStop = cellId.includes(scrapeOrigin);
-                const isDestStop = cellId.includes(scrapeDest);
+                // Use the actual origin/dest passed from the scraper (case insensitive)
+                const isOriginStop = cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
+                const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
                 
                 // Get the estimated time from the cell
                 const stopText = cell.querySelector('.stop--text');
@@ -808,6 +808,8 @@ async function startServer() {
             }
             
             console.log(`Extracted crowding data for ${extractedData.crowding.length} trains`);
+            // DEBUG: Show what kind of data we got (first 3 items) to simplify debugging on Railway
+            console.log("DEBUG EXTRACTED SAMPLE:", JSON.stringify(extractedData.crowding.slice(0, 3), null, 2));
             
             // Count how many have estimated times
             const withEstimates = extractedData.crowding.filter(
