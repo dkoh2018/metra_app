@@ -523,7 +523,7 @@ export default function Schedule() {
                 </div>
                 
                 {/* Secondary Info Row */}
-                <div className="flex items-center gap-4 mt-2 pt-2 border-t border-zinc-100 text-sm text-zinc-600">
+                <div className="flex items-center gap-2 sm:gap-4 mt-2 pt-2 border-t border-zinc-100 text-xs sm:text-sm text-zinc-600 whitespace-nowrap overflow-hidden">
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
                     <span>Arrives</span>
