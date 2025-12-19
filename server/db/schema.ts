@@ -159,6 +159,19 @@ export function initDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_crowding_trip ON crowding_cache(trip_id);
     CREATE INDEX IF NOT EXISTS idx_crowding_updated ON crowding_cache(updated_at);
   `);
+
+  // Create weather_data table - stores current weather for locations
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS weather_data (
+      location TEXT PRIMARY KEY,
+      temp_f REAL,
+      wind_speed_mph REAL,
+      wind_direction INTEGER,
+      condition_code INTEGER,
+      condition_text TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
   
   return db;
 }

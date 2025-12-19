@@ -19,6 +19,7 @@ import { useScheduleData } from '@/hooks/useScheduleData';
 const TrainMap = lazy(() => import('@/components/TrainMap'));
 
 import { STATIONS, Station } from '@/lib/stations';
+import { WeatherWidget } from '@/components/WeatherWidget';
 
 // Legacy styles kept until verified unused or moved
 const CROWDING_BADGE_STYLES: Record<CrowdingLevel, string> = {
@@ -400,10 +401,13 @@ export default function Schedule() {
                   <ArrowRight className="w-3 h-3" />
                   <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">{direction === 'inbound' ? 'Chicago' : selectedStation.name}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <WeatherWidget 
+                    location={direction === 'inbound' ? selectedStation.name : 'Chicago'} 
+                  />
                   {crowdingLevel && (
                     <span className={cn(
-                      "px-2 py-0.5 rounded text-[10px] font-semibold uppercase",
+                      "px-2 py-0.5 rounded text-xs font-semibold uppercase",
                       CROWDING_BADGE_STYLES[crowdingLevel],
                     )}>
                       {crowdingLevel === 'moderate' ? 'Mod' : CROWDING_LABELS[crowdingLevel]}

@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 // Database imports are lazy-loaded to allow server to start without database
 let getAllSchedules: any, getNextTrain: any, shouldUpdateGTFS: any;
 let getAllDelays: any, updateRealtimeData: any;
+let updateWeatherData: any, getAllWeather: any;
 let loadGTFSIntoDatabase: any;
 let getDatabase: any;
 
@@ -155,6 +156,7 @@ async function startServer() {
           const dbModule = await import("./db/schema.js");
           const scheduleModule = await import("./db/schedule-api.js");
           const realtimeModule = await import("./db/realtime-updater.js");
+          const weatherModule = await import("./db/weather-updater.js");
           const loaderModule = await import("./db/gtfs-loader.js");
           
           // Assign to module-level variables
@@ -164,6 +166,8 @@ async function startServer() {
           shouldUpdateGTFS = scheduleModule.shouldUpdateGTFS;
           getAllDelays = realtimeModule.getAllDelays;
           updateRealtimeData = realtimeModule.updateRealtimeData;
+          updateWeatherData = weatherModule.updateWeatherData;
+          getAllWeather = weatherModule.getAllWeather;
           loadGTFSIntoDatabase = loaderModule.loadGTFSIntoDatabase;
           
           // Initialize database schema
@@ -221,6 +225,19 @@ async function startServer() {
       if (updateRealtimeData) {
         updateRealtimeData(apiToken).catch(console.error);
       }
+    }
+
+    // Weather update interval (every 10 minutes)
+    if (updateWeatherData) {
+        // Initial update
+        console.log("🌦️  Fetching initial weather data...");
+        updateWeatherData().catch((err: any) => console.error("Weather init error:", err));
+        
+        // Schedule updates
+        setInterval(() => {
+            console.log("🌦️  Updating weather data...");
+            updateWeatherData().catch((err: any) => console.error("Weather update error:", err));
+        }, 60 * 1000); // 1 minute
     }
 
     const fetchData = async (endpoint: string, res: express.Response) => {
@@ -578,6 +595,20 @@ async function startServer() {
     });
 
     type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
+
+    // Weather API endpoint
+    app.get("/api/weather", (_req, res) => {
+      try {
+        if (!getAllWeather) {
+           return res.json({ weather: [] });
+        }
+        const weather = getAllWeather();
+        res.json({ weather });
+      } catch (error: any) {
+        console.error("Error fetching weather:", error.message);
+        res.status(500).json({ error: "Failed to fetch weather" });
+      }
+    });
 
     // Fetch crowding data from Metra's website
     app.get("/api/crowding", async (req, res) => {

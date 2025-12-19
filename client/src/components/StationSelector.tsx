@@ -30,8 +30,8 @@ export function StationSelector({ selectedGtfsId, onStationChange, className }: 
     <Select value={selectedGtfsId} onValueChange={onStationChange}>
       <SelectTrigger 
         className={cn(
-          "w-auto min-w-[20px] px-2 py-1 h-auto border-0 bg-transparent shadow-none focus:ring-0", 
-          "text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em] hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors",
+          "w-auto min-w-[20px] px-2 py-1 h-auto border-0 bg-transparent shadow-none focus:ring-0 [&_svg]:hidden", 
+          "text-sm sm:text-base md:text-lg font-bold text-zinc-500 uppercase tracking-normal sm:tracking-[0.15em] hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors",
           "justify-center flex gap-2 cursor-pointer",
           className
         )}

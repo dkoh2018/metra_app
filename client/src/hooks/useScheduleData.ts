@@ -269,7 +269,7 @@ export function useScheduleData(
       
       const params = new URLSearchParams({
         origin,
-        dest,
+        destination: dest,
         line: selectedStation.line || 'UP-NW'
       });
       
