@@ -1,14 +1,6 @@
-export interface Station {
-  lat: number;
-  lng: number;
-  name: string;
-  isTerminal?: boolean;
-  isBranch?: boolean;
-  isHighlight?: boolean;
-  gtfsId?: string;
-  line: 'UP-NW' | 'MD-W';
-  terminal: 'OTC' | 'CUS';
-}
+import { Station } from '@shared/types';
+
+export type { Station };
 
 export const STATIONS: Record<string, Station> = {
   harvard: { lat: 42.4197222, lng: -88.6175000, name: 'Harvard', isTerminal: true, gtfsId: 'HARVARD', line: 'UP-NW', terminal: 'OTC' },

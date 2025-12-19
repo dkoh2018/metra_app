@@ -29,7 +29,7 @@ export function ScheduleHeader({
         <button
           onClick={() => setDirection(direction === 'inbound' ? 'outbound' : 'inbound')}
           className={cn(
-            "flex items-center gap-1.5 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-semibold transition-all",
+            "flex-shrink-0 flex items-center gap-1.5 px-1.5 sm:px-2.5 py-1 rounded-lg text-xs font-semibold transition-all",
             "border shadow-sm bg-white",
             direction === 'inbound' 
               ? "border-blue-200 text-blue-700 hover:bg-blue-50" 
@@ -43,7 +43,7 @@ export function ScheduleHeader({
         </button>
 
         {/* Center: Branding - Station Selector */}
-        <div className="flex-1 text-center py-1 flex items-center justify-center">
+        <div className="flex-1 text-center py-1 flex items-center justify-center min-w-0">
           <StationSelector 
             selectedGtfsId={selectedGtfsId} 
             onStationChange={setSelectedGtfsId} 
@@ -51,7 +51,7 @@ export function ScheduleHeader({
         </div>
 
         {/* Right: Live Sync Status - Matches card style */}
-        <div className="flex items-center gap-1.5 px-1.5 sm:px-2.5 py-1 rounded-lg bg-white border border-zinc-200 shadow-sm text-zinc-600">
+        <div className="flex-shrink-0 flex items-center gap-1.5 px-1.5 sm:px-2.5 py-1 rounded-lg bg-white border border-zinc-200 shadow-sm text-zinc-600">
           <span className="relative flex h-1.5 w-1.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>

@@ -1,12 +1,9 @@
 import Database from 'better-sqlite3';
 import { getDatabase } from './schema.js';
 
-export interface TrainSchedule {
-  trip_id: string;
-  departure_time: string;
-  arrival_time: string;
-  is_express: boolean;
-}
+import type { ServerTrainSchedule as TrainSchedule } from '@shared/types';
+
+export type { TrainSchedule };
 
 export interface DayType {
   type: 'weekday' | 'saturday' | 'sunday';

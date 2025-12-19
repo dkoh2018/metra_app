@@ -1,10 +1,5 @@
-export interface Train {
-  id: string;
-  departureTime: string;
-  arrivalTime: string;
-  isExpress: boolean;
-  _tripId?: string;
-}
+import { Train } from '@shared/types';
+export type { Train };
 
 export interface Schedule {
   weekday: {

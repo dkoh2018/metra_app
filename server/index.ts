@@ -781,7 +781,14 @@ async function startServer() {
             
 
             
-            const url = `https://www.metra.com/schedules?line=${lineId}&orig=${origin}&dest=${destination}&time=${firstTrainTimestamp}&allstops=0&redirect=${firstTrainTimestamp}`;
+            const { getMetraScheduleUrl } = await import("@shared/metra-urls");
+            
+            const url = getMetraScheduleUrl({
+              origin: String(origin),
+              destination: String(destination),
+              line: String(lineId),
+              date: firstTrainTimestamp * 1000 // Convert back to ms for the helper
+            });
             
             scrapeBrowser = await puppeteer.launch({
               headless: true,

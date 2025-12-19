@@ -4,6 +4,7 @@ import { RotateCcw } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { STATIONS, type Station } from '@/lib/stations';
+import { SUPPORTED_LINES } from '@shared/constants';
 
 // Key stations on the UP-NW line (full line from Harvard to Chicago)
 // Coordinates from GTFS stops.txt
@@ -375,7 +376,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const fetchPositions = useCallback(async () => {
     try {
       // Fetch both lines in parallel
-      const lines = ['UP-NW', 'MD-W'];
+      const lines = SUPPORTED_LINES;
       const responses = await Promise.all(
         lines.map(id => fetch(`/api/positions/${id}`).then(r => r.json()))
       );
@@ -404,7 +405,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
 
   // Fetch rail line shapes for ALL lines on mount
   useEffect(() => {
-    const lines = ['UP-NW', 'MD-W'];
+    const lines = SUPPORTED_LINES;
     
     Promise.all(lines.map(id => fetch(`/api/shapes/${id}`).then(r => r.json())))
       .then(results => {
