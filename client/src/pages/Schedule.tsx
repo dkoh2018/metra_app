@@ -6,6 +6,7 @@ import { getCurrentMinutesInChicago } from '@/lib/time';
 // Refactored Imports
 import { Direction } from '@/types/schedule';
 import { getTrainMinutesForComparison } from '@/lib/schedule-helpers';
+import { getMinutesUntilTrain, OVERNIGHT_CONFIG } from '@/lib/overnight-utils';
 import { ScheduleTable } from '@/components/schedule/ScheduleTable';
 import { ScheduleAlerts } from '@/components/schedule/ScheduleAlerts';
 import { ScheduleHeader } from '@/components/schedule/ScheduleHeader';
@@ -19,9 +20,18 @@ const TrainMap = lazy(() => import('@/components/TrainMap'));
 import { STATIONS, Station } from '@/lib/stations';
 
 export default function Schedule() {
-  const [direction, setDirection] = useState<Direction>('inbound');
+  // Initialize direction from sessionStorage (persists on refresh, clears on tab close)
+  const [direction, setDirection] = useState<Direction>(() => {
+    const saved = sessionStorage.getItem('metra_direction');
+    return (saved === 'inbound' || saved === 'outbound') ? saved : 'inbound';
+  });
   const [nextTrain, setNextTrain] = useState<Train | null>(null);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+
+  // Save direction to sessionStorage when it changes
+  useEffect(() => {
+    sessionStorage.setItem('metra_direction', direction);
+  }, [direction]);
 
   // Phase 2: Multi-Station State
   // Get default station: first highlighted station, or fallback to first station with gtfsId
@@ -33,7 +43,21 @@ export default function Schedule() {
   };
   
   const defaultStation = getDefaultStation();
-  const [selectedGtfsId, setSelectedGtfsId] = useState<string>(defaultStation.gtfsId!);
+  
+  // Use sessionStorage so station persists on refresh but resets on new browser session
+  const [selectedGtfsId, setSelectedGtfsId] = useState<string>(() => {
+    const saved = sessionStorage.getItem('selectedStation');
+    if (saved && Object.values(STATIONS).some(s => s.gtfsId === saved)) {
+      return saved;
+    }
+    return defaultStation.gtfsId!;
+  });
+  
+  // Save station selection to sessionStorage whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('selectedStation', selectedGtfsId);
+  }, [selectedGtfsId]);
+  
   const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || defaultStation;
   
   console.log('[Schedule] Render State:', { 
@@ -81,14 +105,13 @@ export default function Schedule() {
       return null;
     }
     
-    const next = trains.find(train => {
-      // Check if this train has an estimated departure time
+    // Find all upcoming trains with their minutes-until-departure
+    const upcomingTrains = trains.map(train => {
       const estimate = estimatedTimes.get(train.id);
-      let departureTimeStr = train.departureTime;
+      let trainMinutes: number;
       
-      // If there's an estimated departure, parse it to 24h format
+      // If there's an estimated departure, use it
       if (estimate?.predicted_departure) {
-        // Parse "8:13 PM" format to minutes
         const match = estimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
         if (match) {
           let hours = parseInt(match[1], 10);
@@ -98,28 +121,31 @@ export default function Schedule() {
           if (period === 'PM' && hours !== 12) hours += 12;
           if (period === 'AM' && hours === 12) hours = 0;
           
-          const estimatedMinutes = hours * 60 + mins;
-          
-          // Handle overnight for estimated times too (if estimated time is early morning when viewing late at night)
-          const LATE_NIGHT_THRESHOLD = 18 * 60;
-          const EARLY_MORNING_CUTOFF = 4 * 60;
-          let adjustedEstimatedMinutes = estimatedMinutes;
-          
-          if (currentMinutes >= LATE_NIGHT_THRESHOLD && estimatedMinutes < EARLY_MORNING_CUTOFF) {
-            adjustedEstimatedMinutes += 24 * 60;
-          }
-          
-          return adjustedEstimatedMinutes > currentMinutes;
+          trainMinutes = hours * 60 + mins;
+        } else {
+          trainMinutes = getTrainMinutesForComparison(train.departureTime, currentMinutes);
         }
+      } else {
+        trainMinutes = getTrainMinutesForComparison(train.departureTime, currentMinutes);
       }
       
-      // Use helper function to handle overnight trains correctly
-      const trainMinutes = getTrainMinutesForComparison(departureTimeStr, currentMinutes);
-      return trainMinutes > currentMinutes;
+      // Use centralized overnight utility for consistent handling
+      const minutesUntil = getMinutesUntilTrain(trainMinutes, currentMinutes);
+      
+      return { 
+        train, 
+        minutesUntil: minutesUntil !== null ? minutesUntil : Infinity 
+      };
     });
     
-    return next || trains[0] || null;
-  }, [dayType, direction, scheduleData, estimatedTimes]);
+    // Sort by minutes until departure and pick the closest upcoming train
+    upcomingTrains.sort((a, b) => a.minutesUntil - b.minutesUntil);
+    
+    // Find first train with valid (non-Infinity) minutes until
+    const next = upcomingTrains.find(t => t.minutesUntil !== Infinity && t.minutesUntil > 0);
+    
+    return next?.train || trains[0] || null;
+  }, [dayType, direction, scheduleData, estimatedTimes, currentMinutes]);
   
   useEffect(() => {
     if (nextTrain?.id !== computedNextTrain?.id) {

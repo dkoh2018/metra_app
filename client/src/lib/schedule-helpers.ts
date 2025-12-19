@@ -4,8 +4,8 @@ import { parseTimeToMinutes } from './time-utils';
 import { Train } from './scheduleData';
 
 // Cache compiled regex patterns for better performance
-// Supports UP-NW (UNW) and MD-W (MW) IDs
-export const TRIP_ID_REGEX = /(?:UNW|MW)(\d+)/;
+// Supports UP-NW (UNW), UP-N (UN), MD-W (MW), and BNSF (BN) IDs
+export const TRIP_ID_REGEX = /(?:UNW|UN|MW|BN)(\d+)/;
 export const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
 export const MINUTES_PATTERN_REGEX = /(\d+)\s*min/;
 
@@ -36,9 +36,9 @@ export function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string
   } else {
     // Fallback: split by _ and try to find the part with digits
     const parts = apiTrain.trip_id.split('_');
-    const numberPart = parts.find(p => /\d+/.test(p) && (p.includes('UNW') || p.includes('MW')));
+    const numberPart = parts.find(p => /\d+/.test(p) && (p.includes('UNW') || p.includes('MW') || p.includes('UN')));
     if (numberPart) {
-      trainId = numberPart.replace('UNW', '').replace('MW', '');
+      trainId = numberPart.replace('UNW', '').replace('MW', '').replace('UN', '');
     }
   }
 
@@ -58,30 +58,22 @@ export function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string
 }
 
 // Helper to convert departure time to minutes for comparison (handles overnight trains)
+// Uses centralized overnight-utils for edge case handling
+import { getAdjustedTrainMinutes } from './overnight-utils';
+
 export function getTrainMinutesForComparison(departureTimeStr: string, currentMinutesValue: number): number {
   if (!departureTimeStr) return 9999;
   
-  let validTimeStr = departureTimeStr;
+  // Parse the time string to minutes
+  let mins = parseTimeToMinutes(departureTimeStr);
   
-  // Handle strings like "25:15:00" (GTFS overnight format)
-  // But also handle "1:15 AM" which might be overnight if it's currently 11 PM
-  // Or "1:15 AM" which is morning if it's currently 8 AM
-  
-  // Standard parser
-  let mins = parseTimeToMinutes(validTimeStr);
-  
-  // Handle GTFS > 24h times immediately
-  const parts = validTimeStr.split(':');
+  // Handle GTFS > 24h times - keep as-is for overnight-utils to handle
+  const parts = departureTimeStr.split(':');
   if (parseInt(parts[0]) >= 24) {
-    return mins; // parseTimeToMinutes handles it or returns > 1440
+    // For GTFS overnight format, return adjusted value
+    return getAdjustedTrainMinutes(mins, currentMinutesValue);
   }
   
-  // If the train is early morning (e.g. 00:30) and we are late night (e.g. 23:30),
-  // treat the train as "tomorrow" (add 24h) so it appears at the bottom
-  // Threshold: if train is < 4am and current is > 8pm
-  if (mins < 4 * 60 && currentMinutesValue > 20 * 60) {
-    mins += 24 * 60;
-  }
-  
-  return mins;
+  // Use centralized overnight handling
+  return getAdjustedTrainMinutes(mins, currentMinutesValue);
 }

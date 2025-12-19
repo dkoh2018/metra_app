@@ -86,6 +86,36 @@ export function useScheduleData(
 
   // Fetch schedule data from GTFS API
   useEffect(() => {
+    // Check for pre-injected data first (for instant page loads)
+    const initialData = (window as any).__INITIAL_DATA__;
+    if (initialData?.schedules?.[selectedGtfsId]) {
+      console.log('[useScheduleData] Using pre-injected schedule data for', selectedGtfsId);
+      const data = initialData.schedules[selectedGtfsId];
+      const newTripIdMap = new Map<string, string>();
+      
+      const transformed: ScheduleDataState = {
+        weekday: {
+          inbound: (data.weekday?.inbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap)),
+          outbound: (data.weekday?.outbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap))
+        },
+        saturday: {
+          inbound: (data.saturday?.inbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap)),
+          outbound: (data.saturday?.outbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap))
+        },
+        sunday: {
+          inbound: (data.sunday?.inbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap)),
+          outbound: (data.sunday?.outbound || []).map((train: ApiTrain) => transformTrain(train, newTripIdMap))
+        }
+      };
+      setScheduleData(transformed);
+      setTripIdMap(newTripIdMap);
+      setScheduleLoading(false);
+      
+      // Clear the used data to prevent stale re-use
+      delete initialData.schedules[selectedGtfsId];
+      return; // Skip API fetch since we have data
+    }
+    
     setScheduleLoading(true);
     setScheduleError(null);
 
@@ -240,6 +270,59 @@ export function useScheduleData(
 
   // Fetch crowding data
   useEffect(() => {
+    // Check for pre-injected crowding data first (for instant page loads)
+    const terminalId = selectedStation.terminal || 'OTC';
+    const lineId = selectedStation.line || 'UP-NW';
+    const cacheKey = `${selectedGtfsId}_${terminalId}_${lineId}`;
+    const initialData = (window as any).__INITIAL_DATA__;
+    
+    if (initialData?.crowding?.[cacheKey]) {
+      console.log('[useScheduleData] Using pre-injected crowding data for', cacheKey);
+      const crowdingArray = initialData.crowding[cacheKey];
+      const newCrowdingData = new Map<string, CrowdingLevel>();
+      const newEstimatedTimes = new Map<string, {
+        scheduled_departure: string | null;
+        predicted_departure: string | null;
+        scheduled_arrival: string | null;
+        predicted_arrival: string | null;
+      }>();
+      
+      crowdingArray.forEach((item: any) => {
+        if (item.crowding) {
+          newCrowdingData.set(item.trip_id, item.crowding as CrowdingLevel);
+          // Also map by train number for easier lookup
+          const trainMatch = item.trip_id.match(TRIP_ID_REGEX);
+          if (trainMatch) {
+            newCrowdingData.set(trainMatch[1], item.crowding as CrowdingLevel);
+          }
+        }
+        if (item.scheduled_departure || item.predicted_departure || item.scheduled_arrival || item.predicted_arrival) {
+          newEstimatedTimes.set(item.trip_id, {
+            scheduled_departure: item.scheduled_departure,
+            predicted_departure: item.predicted_departure,
+            scheduled_arrival: item.scheduled_arrival,
+            predicted_arrival: item.predicted_arrival
+          });
+          // Also map by train number
+          const trainMatch = item.trip_id.match(TRIP_ID_REGEX);
+          if (trainMatch) {
+            newEstimatedTimes.set(trainMatch[1], {
+              scheduled_departure: item.scheduled_departure,
+              predicted_departure: item.predicted_departure,
+              scheduled_arrival: item.scheduled_arrival,
+              predicted_arrival: item.predicted_arrival
+            });
+          }
+        }
+      });
+      
+      setCrowdingData(newCrowdingData);
+      setEstimatedTimes(newEstimatedTimes);
+      
+      // Clear used data
+      delete initialData.crowding[cacheKey];
+    }
+    
     const reloadFromStorage = () => {
       try {
         const saved = localStorage.getItem(`crowding_${selectedGtfsId}`);

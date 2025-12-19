@@ -3,17 +3,21 @@
 export function parseTimeToMinutes(timeStr: string): number {
   if (!timeStr) return -1;
   
-  // Handle "HH:MM AM/PM" format
+  // Handle "HH:MM AM/PM" format (supports a.m./p.m.)
   if (timeStr.toLowerCase().includes('m')) {
-    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/i);
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm|a\.m\.|p\.m\.)/i);
     if (!match) return -1;
     
     let [_, hoursStr, minsStr, meridian] = match;
     let hours = parseInt(hoursStr);
     const mins = parseInt(minsStr);
     
-    if (meridian.toUpperCase() === 'PM' && hours !== 12) hours += 12;
-    if (meridian.toUpperCase() === 'AM' && hours === 12) hours = 0;
+    // Normalize meridian
+    const isPM = meridian.toLowerCase().startsWith('p');
+    const isAM = meridian.toLowerCase().startsWith('a');
+    
+    if (isPM && hours !== 12) hours += 12;
+    if (isAM && hours === 12) hours = 0;
     
     return hours * 60 + mins;
   }
@@ -27,6 +31,18 @@ export function formatPredictedTimeDisplay(timeStr?: string | null): string | nu
   if (!timeStr) return null;
   // If it already has AM/PM, return as is
   if (timeStr.toLowerCase().includes('m')) return timeStr;
+  
+  // Handle ISO string (e.g. 2025-12-18T23:52:00)
+  if (timeStr.includes('T')) {
+    const date = new Date(timeStr);
+    if (!isNaN(date.getTime())) {
+      let h = date.getHours();
+      const m = date.getMinutes();
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+    }
+  }
   
   // Otherwise assume HH:MM:SS or HH:MM and convert to 12h
   const [hStr, mStr] = timeStr.split(':');

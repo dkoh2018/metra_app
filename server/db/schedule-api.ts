@@ -118,17 +118,37 @@ export function getScheduleForDayType(
 
 /**
  * Get all schedules (weekday, saturday, sunday)
+ * Uses in-memory cache to avoid DB queries on every HTML injection
  */
+const scheduleCache = new Map<string, {
+  data: { weekday: DayType; saturday: DayType; sunday: DayType };
+  timestamp: number;
+}>();
+const SCHEDULE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes - schedules are static GTFS data
+
 export function getAllSchedules(stationId: string = 'PALATINE', terminalId: string = 'OTC'): {
   weekday: DayType;
   saturday: DayType;
   sunday: DayType;
 } {
-  return {
+  const cacheKey = `${stationId}_${terminalId}`;
+  const now = Date.now();
+  const cached = scheduleCache.get(cacheKey);
+  
+  // Return cached data if still valid
+  if (cached && (now - cached.timestamp) < SCHEDULE_CACHE_TTL) {
+    return cached.data;
+  }
+  
+  // Fetch fresh data and cache it
+  const data = {
     weekday: getScheduleForDayType('weekday', stationId, terminalId),
     saturday: getScheduleForDayType('saturday', stationId, terminalId),
     sunday: getScheduleForDayType('sunday', stationId, terminalId)
   };
+  
+  scheduleCache.set(cacheKey, { data, timestamp: now });
+  return data;
 }
 
 /**

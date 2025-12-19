@@ -208,7 +208,8 @@ export function NextTrainCard({
         {/* Time Row - Primary Info - Always single row */}
         <div className="flex flex-row items-center justify-between gap-2 mb-2">
           {/* Left: Departure Time */}
-          <div className="flex items-baseline gap-2">
+          {/* Left: Departure Time */}
+          <div className="flex items-center gap-2">
             <div className={cn(
               "text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums tracking-tight text-zinc-900",
               delayMinutes && delayMinutes > 0 ? "text-red-600" : "",
@@ -229,23 +230,23 @@ export function NextTrainCard({
                   if (diffMins !== 0) {
                     const isDelayed = diffMins > 0;
                     return (
-                      <>
-                        <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{sched}</span>
-                        <span className={isDelayed ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>
-                          {pred}{' '}
-                          <span className="text-sm sm:text-lg">({isDelayed ? '+' : ''}{diffMins}min)</span>
-                        </span>
-                      </>
+                      <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2 leading-none sm:leading-normal">
+                        <div className="flex items-baseline gap-2">
+                           <span className="line-through text-zinc-400 text-sm sm:text-xl">{sched}</span>
+                           <span className={isDelayed ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>{pred}</span>
+                        </div>
+                        <span className="text-xs sm:text-lg font-medium whitespace-nowrap">({isDelayed ? '+' : ''}{diffMins}min)</span>
+                      </div>
                     );
                   }
                 }
                 // Priority 2: Use real-time API prediction
                 if (predictedDeparture && scheduledDeparture && scheduledDeparture !== predictedDeparture) {
                   return (
-                    <>
-                      <span className="line-through text-zinc-400 text-base sm:text-xl mr-1 sm:mr-2">{scheduledDeparture}</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="line-through text-zinc-400 text-sm sm:text-xl">{scheduledDeparture}</span>
                       <span className="text-red-600">{predictedDeparture}</span>
-                    </>
+                    </div>
                   );
                 }
                 // Default: show formatted departure time
@@ -253,7 +254,7 @@ export function NextTrainCard({
               })()}
             </div>
             <div className={cn(
-              "flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[8px] sm:text-[10px] font-bold uppercase tracking-wider rounded-full border shadow-sm",
+              "flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[8px] sm:text-[10px] font-bold uppercase tracking-wider rounded-full border shadow-sm self-center",
               direction === 'outbound' 
                 ? "bg-amber-50 text-amber-700 border-amber-200" 
                 : "bg-blue-50 text-blue-700 border-blue-200"
@@ -302,69 +303,76 @@ export function NextTrainCard({
         </div>
         
         {/* Secondary Info Row */}
-        <div className="flex items-center gap-2 sm:gap-4 mt-2 pt-2 border-t border-zinc-100 text-xs sm:text-sm text-zinc-900 whitespace-nowrap overflow-hidden">
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Arrives</span>
-            {(() => {
-              // Check scraped estimated arrival first
-              if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
-                const sched = scrapedEstimate.scheduled_arrival;
-                const pred = scrapedEstimate.predicted_arrival;
+        <div className="flex items-center mt-2 pt-2 border-t border-zinc-100 text-xs sm:text-sm text-zinc-900">
+          {/* Left side: Arrives + Duration + Weather */}
+          <div className="flex items-center gap-1 sm:gap-3 flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="shrink-0">Arrives</span>
+              {(() => {
+                // Check scraped estimated arrival first
+                if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
+                  const sched = scrapedEstimate.scheduled_arrival;
+                  const pred = scrapedEstimate.predicted_arrival;
+                  
+                  // Parse times to calculate difference
+                  const schedMins = parseTimeToMinutes(sched);
+                  const predMins = parseTimeToMinutes(pred);
+                  const diffMins = predMins - schedMins;
+                  
+                  if (diffMins !== 0) {
+                    const isLate = diffMins > 0;
+                    return (
+                      <span className={cn("font-semibold shrink-0", isLate ? "text-rose-600" : "text-emerald-600")}>
+                        {pred}
+                        <span className="text-[10px] ml-0.5">({isLate ? '+' : ''}{diffMins}min)</span>
+                      </span>
+                    );
+                  }
+                }
                 
-                // Parse times to calculate difference
-                const schedMins = parseTimeToMinutes(sched);
-                const predMins = parseTimeToMinutes(pred);
-                const diffMins = predMins - schedMins;
-                
-                if (diffMins !== 0) {
-                  const isLate = diffMins > 0;
+                // Fallback to real-time API prediction
+                if (predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival) {
                   return (
-                    <span className={cn("font-semibold", isLate ? "text-rose-600" : "text-emerald-600")}>
-                      {pred}{' '}
-                      <span className="text-xs">({isLate ? '+' : ''}{diffMins}min)</span>
+                    <span className="font-semibold text-rose-600 shrink-0">
+                      {predictedArrival}
                     </span>
                   );
                 }
-              }
-              
-              // Fallback to real-time API prediction
-              if (predictedArrival && scheduledArrival && scheduledArrival !== predictedArrival) {
-                return (
-                  <span className="font-semibold text-rose-600">
-                    {predictedArrival}
-                  </span>
-                );
-              }
-              
-              return <span className="font-semibold">{predictedArrival || formatTime(nextTrain.arrivalTime)}</span>;
-            })()}
+                
+                return <span className="font-semibold shrink-0">{predictedArrival || formatTime(nextTrain.arrivalTime)}</span>;
+              })()}
+            </div>
+            <span className="text-zinc-300 shrink-0">·</span>
+            <span className="shrink-0">
+              {(() => {
+                // Calculate duration from estimated times if available
+                if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
+                  const depMins = parseTimeToMinutes(scrapedEstimate.predicted_departure);
+                  const arrMins = parseTimeToMinutes(scrapedEstimate.predicted_arrival);
+                  let estimatedDuration = arrMins - depMins;
+                  
+                  // Handle overnight trains (e.g. 11 PM to 12 AM)
+                  if (estimatedDuration < 0) {
+                    estimatedDuration += 24 * 60;
+                  }
+                  
+                  if (estimatedDuration > 0) {
+                    return `${estimatedDuration}m trip`;
+                  }
+                }
+                
+                // Default: use scheduled duration
+                return `${duration}m trip`;
+              })()}
+            </span>
+            <span className="text-zinc-300 shrink-0">·</span>
+            <div className="shrink-0">
+              <WeatherWidget 
+                location={direction === 'inbound' ? 'Chicago' : selectedStation.name} 
+              />
+            </div>
           </div>
-          <span className="text-zinc-400">•</span>
-          {(() => {
-            // Calculate duration from estimated times if available
-            if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
-              const depMins = parseTimeToMinutes(scrapedEstimate.predicted_departure);
-              const arrMins = parseTimeToMinutes(scrapedEstimate.predicted_arrival);
-              let estimatedDuration = arrMins - depMins;
-              
-              // Handle overnight trains (e.g. 11 PM to 12 AM)
-              if (estimatedDuration < 0) {
-                estimatedDuration += 24 * 60;
-              }
-              
-              if (estimatedDuration > 0) {
-                return <span>{estimatedDuration} min trip</span>;
-              }
-            }
-            
-            // Default: use scheduled duration
-            return <span>{duration} min trip</span>;
-          })()}
-          <span className="text-zinc-400">•</span>
-          <WeatherWidget 
-            location={direction === 'inbound' ? 'Chicago' : selectedStation.name} 
-          />
+          {/* Right side: Tracker link - always visible */}
           <a 
             href={(() => {
               const now = new Date();
@@ -382,7 +390,7 @@ export function NextTrainCard({
             })()}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-primary hover:underline text-xs font-medium ml-auto"
+            className="flex items-center gap-1 text-primary hover:underline text-xs font-medium ml-2 shrink-0"
           >
             <ExternalLink className="w-3 h-3" />
             <span>Tracker</span>

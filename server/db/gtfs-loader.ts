@@ -78,7 +78,7 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     // Load trips
     const trips = parseCSV(path.join(GTFS_DIR, 'trips.txt')) as unknown as Trip[];
     // Filter for UP-NW and MD-W routes (Milwaukee District West)
-    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W');
+    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W' || t.route_id === 'UP-N');
     console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W)`);
     
     // Load calendar

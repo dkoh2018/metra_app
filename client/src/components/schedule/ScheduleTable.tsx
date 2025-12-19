@@ -6,6 +6,7 @@ import { Train } from '@/lib/scheduleData';
 import { Direction, CrowdingLevel } from '@/types/schedule';
 import { parseTimeToMinutes, formatPredictedTimeDisplay, calculateDuration, isPredictedTimeReasonable } from '@/lib/time-utils';
 import { CROWDING_DOT_STYLES } from '@/lib/schedule-helpers';
+import { hasTrainDeparted, getMinutesUntilTrain } from '@/lib/overnight-utils';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -116,115 +117,17 @@ export const ScheduleTable = memo(function ScheduleTable({
     return formatPredictedTimeDisplay(timeStr);
   };
 
+  // Use centralized overnight utilities for consistent time handling
   const hasDeparted = (departureTime: string, currentMinutesValue: number): boolean => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
-    
-    // Service day boundary: 1 AM (60 minutes into the day)
-    // Trains with departure times from 24:00-25:59 in GTFS are overnight trains
-    const SERVICE_DAY_START = 60; // 1:00 AM
-    const LATE_NIGHT_THRESHOLD = 18 * 60; // 6:00 PM - after this, early morning trains are "tomorrow"
-    const OVERNIGHT_CUTOFF = 1 * 60; // 1:00 AM - trains before this are "tonight's late" trains
-    
-    const isBeforeServiceDayStart = currentMinutesValue < SERVICE_DAY_START;
-    const isLateNight = currentMinutesValue >= LATE_NIGHT_THRESHOLD; // After 6 PM
-    
-    // DEBUG: Log early morning trains (00:XX) to see what's happening
-    if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
-      console.debug(`[hasDeparted] Early morning train: ${departureTime} (${depHours*60 + depMinutes} min) vs current: ${currentMinutesValue} min (${Math.floor(currentMinutesValue/60)}:${String(currentMinutesValue%60).padStart(2, '0')}), isBeforeServiceDayStart: ${isBeforeServiceDayStart}`);
-    }
-    
-    // GTFS overnight trains (24:XX, 25:XX) are for "next day"
-    if (depHours >= 24) {
-      // Normalize to 0-23 range (24:12 -> 0:12)
-      const normalizedHours = depHours - 24;
-      const normalizedMinutes = normalizedHours * 60 + depMinutes;
-      
-      // If we are in the early morning (00:00 - 04:00)
-      // Then we can compare directly as we are effectively in the "same" extended day
-      const EARLY_MORNING_CUTOFF = 4 * 60; // 4:00 AM
-      
-      if (currentMinutesValue < EARLY_MORNING_CUTOFF) {
-        const result = normalizedMinutes < currentMinutesValue;
-        if (Math.random() < 0.01) {
-          console.debug(`[hasDeparted] Overnight train (${departureTime} -> ${normalizedHours}:${depMinutes}) in early morning: ${result ? 'DEPARTED' : 'UPCOMING'}`);
-        }
-        return result;
-      }
-      
-      // Otherwise, if we are later in the day (4 AM - 23:59)
-      // Any 24:xx train is in the future (tonight/tomorrow morning).
-      return false;
-    }
-    
-    const depTotalMinutes = depHours * 60 + depMinutes;
-    
-    // Before 1 AM: we're in the early morning of the current day
-    // At 12:08 AM, trains from 1 AM onwards are TODAY's trains, not yesterday's!
-    if (isBeforeServiceDayStart) {
-      // If train is between midnight and current time, it's departed
-      if (depTotalMinutes < currentMinutesValue) {
-        const result = true;
-        if (Math.random() < 0.01) {
-          console.debug(`[hasDeparted] Before service day start: ${departureTime} (${depTotalMinutes}) < ${currentMinutesValue}: DEPARTED`);
-        }
-        return result;
-      }
-      // All other trains (current time onwards, including 1 AM+) are upcoming
-      if (Math.random() < 0.01) {
-        console.debug(`[hasDeparted] Before service day start, train ${departureTime} (${depTotalMinutes}) >= ${currentMinutesValue}: UPCOMING (today's train)`);
-      }
-      return false;
-    }
-    
-    // After 1 AM: handle early morning trains (00:XX) correctly
-    // At 4:42 AM, a 12:12 AM train (12 min) is from today and already departed
-    if (!isBeforeServiceDayStart && depTotalMinutes < SERVICE_DAY_START) {
-      // We're past 1 AM, checking a train before 1 AM - it's from today and already departed
-      if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
-        console.debug(`[hasDeparted] After service day start, checking early train: ${departureTime} (${depTotalMinutes}) < ${SERVICE_DAY_START} < ${currentMinutesValue}: DEPARTED ✓`);
-      }
-      return true;
-    }
-    
-    // Key fix: When viewing late at night (after 6 PM), early morning trains 
-    // (midnight to 1 AM) are TOMORROW's trains, not today's departed trains
-    if (isLateNight && depTotalMinutes < OVERNIGHT_CUTOFF) {
-      // This is an overnight train for tonight/tomorrow - NOT departed yet
-      if (Math.random() < 0.01) {
-        console.debug(`[hasDeparted] Late night, early morning train (${departureTime}): UPCOMING (tomorrow's train)`);
-      }
-      return false;
-    }
-    
-    // Regular comparison: departed if train time is before current time
-    const result = depTotalMinutes < currentMinutesValue;
-    if (depHours === 0 || (depHours === 1 && depMinutes === 0)) {
-      console.debug(`[hasDeparted] Regular comparison: ${departureTime} (${depTotalMinutes}) vs ${currentMinutesValue}: ${result ? 'DEPARTED' : 'UPCOMING'}`);
-    }
-    return result;
+    const trainMinutes = depHours * 60 + depMinutes;
+    return hasTrainDeparted(trainMinutes, currentMinutesValue);
   };
 
   const getMinutesUntilDeparture = (departureTime: string, currentMinutesValue: number): number | null => {
     const [depHours, depMinutes] = departureTime.split(':').map(Number);
-    
-    // Handle GTFS overnight format (24:XX = tomorrow's AM hours)
-    // For 24:12, depTotalMinutes = 24*60 + 12 = 1452
-    // At current 23:22 (1402), minutes until = 1452 - 1402 = 50
-    const depTotalMinutes = depHours * 60 + depMinutes;
-    
-    let minutesUntil = depTotalMinutes - currentMinutesValue;
-    
-    // If negative but within reasonable range, train already departed
-    if (minutesUntil < 0 && minutesUntil > -60) {
-      return null;
-    }
-    
-    // If very negative, it might mean we need to add a day
-    if (minutesUntil < 0) {
-      minutesUntil += 24 * 60;
-    }
-    
-    return minutesUntil > 0 && minutesUntil < 1440 ? minutesUntil : null;
+    const trainMinutes = depHours * 60 + depMinutes;
+    return getMinutesUntilTrain(trainMinutes, currentMinutesValue);
   };
 
   // Memoize hasDeparted calculations for all trains to avoid recalculating on every render

@@ -28,14 +28,14 @@ export function WeatherWidget({ location, className }: WeatherWidgetProps) {
   };
 
   return (
-    <div className={cn("flex items-center gap-2 text-xs font-medium", className)}>
-      <div className="flex items-center gap-1.5 px-0 py-0">
+    <div className={cn("flex items-center gap-1 text-xs font-medium", className)}>
+      <div className="flex items-center gap-0.5">
         {getIcon(weather.condition_code)}
         <span>{Math.round(weather.temp_f)}°</span>
       </div>
       
       {weather.wind_speed_mph > 10 && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <Wind className="w-2.5 h-2.5" />
           <span>{Math.round(weather.wind_speed_mph)}</span>
         </div>

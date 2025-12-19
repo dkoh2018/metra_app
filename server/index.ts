@@ -16,6 +16,27 @@ let getDatabase: any;
 // Track ongoing scraping operations to prevent concurrent scrapes
 const scrapingLocks = new Map<string, Promise<any>>();
 
+// Cache for train positions (shared across all requests for instant page loads)
+const positionsCache = new Map<string, {
+  data: any;
+  timestamp: number;
+}>();
+const POSITIONS_CACHE_TTL = 10 * 1000; // 10 seconds for real-time feel
+
+// Cache for crowding data (shared across all requests for instant page loads)
+// Key format: "ORIGIN_DESTINATION_LINE" (e.g., "PALATINE_OTC_UP-NW")
+const crowdingCache = new Map<string, {
+  data: Array<{
+    trip_id: string;
+    crowding: string;
+    scheduled_departure?: string | null;
+    predicted_departure?: string | null;
+    scheduled_arrival?: string | null;
+    predicted_arrival?: string | null;
+  }>;
+  timestamp: number;
+}>();
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -271,17 +292,12 @@ async function startServer() {
 
     // Line-specific train positions (UP-NW, MD-W, etc.)
     // Cache positions to prevent hitting Metra rate limits with multiple users
-    // Map cache by lineId
-    const positionsCache = new Map<string, {
-      data: any;
-      timestamp: number;
-    }>();
-    const POSITIONS_CACHE_TTL = 10 * 1000; // 10 seconds for real-time feel
+    // Note: positionsCache is defined at module level for access by HTML injection
 
     app.get("/api/positions/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }
@@ -317,7 +333,7 @@ async function startServer() {
         const lineTrains = body.entity
           .filter((entity: any) => entity.vehicle?.trip?.routeId === lineId)
           .map((entity: any) => {
-            const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace(lineId === 'UP-NW' ? 'UNW' : 'MDW', '') || 'Unknown';
+            const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace(/\D/g, '') || 'Unknown';
             const trainNum = parseInt(trainNumber);
             const direction = !isNaN(trainNum) ? (trainNum % 2 === 0 ? 'inbound' : 'outbound') : 'unknown';
             
@@ -411,7 +427,7 @@ async function startServer() {
     app.get("/api/shapes/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }
@@ -629,10 +645,19 @@ async function startServer() {
         }
       }, 55000); // 55 seconds to avoid Railway's 60s timeout
       
-      // Clear timeout when response is sent
+      // Clear timeout when response is sent, and cache crowding data for HTML injection
       const clearTimeoutAndSend = (data: any) => {
         clearTimeout(timeout);
         const elapsed = Date.now() - startTime;
+        
+        // Store crowding data in memory cache for instant page loads
+        if (data?.crowding && data.crowding.length > 0) {
+          crowdingCache.set(cacheKey, {
+            data: data.crowding,
+            timestamp: Date.now()
+          });
+        }
+        
         if (!res.headersSent) {
           try {
             console.log(`[API] [${requestId}] Sending response after ${elapsed}ms (${data?.crowding?.length || 0} entries)`);
@@ -919,9 +944,9 @@ async function startServer() {
                 if (!cellId) return;
                 
                 // Extract trip_id by removing the stop suffix (e.g., "_APALATINE", "_OTC", "_PALATINE")
-                // Trip IDs look like: UP-NW_UNW672_V3_A or MD-W_MW2254_V2_A
+                // Trip IDs look like: UP-NW_UNW672_V3_A or MD-W_MW2254_V2_A or UP-N_UN377_V1_A
                 // Cell IDs look like: UP-NW_UNW672_V3_APALATINE or MD-W_MW2254_V2_ASCHAUM
-                const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W)_[A-Z0-9]+_V\d+_[A-Z])/);
+                const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W|UP-N)_[A-Z0-9]+_V\d+_[A-Z])/);
                 if (!tripIdMatch) return;
                 const tripId = tripIdMatch[1];
                 
@@ -1372,9 +1397,72 @@ async function startServer() {
       next(err);
     });
 
-    // Handle client-side routing
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(staticPath, "index.html"));
+    // Handle client-side routing - inject initial data for instant page loads
+    app.get("*", async (_req, res) => {
+      try {
+        // Read the HTML file
+        const htmlPath = path.join(staticPath, "index.html");
+        let html = fs.readFileSync(htmlPath, 'utf8');
+        
+        // Gather initial data (use cached data from server memory)
+        const initialData: Record<string, any> = {};
+        
+        // Get schedule data for default station (PALATINE)
+        try {
+          if (getAllSchedules) {
+            initialData.schedules = {
+              PALATINE: getAllSchedules('PALATINE'),
+              SCHAUM: getAllSchedules('SCHAUM'),
+              WILMETTE: getAllSchedules('WILMETTE')
+            };
+          }
+        } catch (e) {
+          console.debug('Could not pre-load schedules:', e);
+        }
+        
+        // Get weather data
+        try {
+          if (getAllWeather) {
+            initialData.weather = getAllWeather();
+          }
+        } catch (e) {
+          console.debug('Could not pre-load weather:', e);
+        }
+        
+        // Get cached train positions (from memory cache)
+        try {
+          if (positionsCache.size > 0) {
+            initialData.positions = {};
+            positionsCache.forEach((data: { data: any; timestamp: number }, lineId: string) => {
+              initialData.positions[lineId] = data.data;
+            });
+          }
+        } catch (e) {
+          console.debug('Could not pre-load positions:', e);
+        }
+        
+        // Get cached crowding data (from memory cache)
+        try {
+          if (crowdingCache.size > 0) {
+            initialData.crowding = {};
+            crowdingCache.forEach((cached, routeKey) => {
+              initialData.crowding[routeKey] = cached.data;
+            });
+          }
+        } catch (e) {
+          console.debug('Could not pre-load crowding:', e);
+        }
+        
+        // Inject the data into HTML before </head>
+        const dataScript = `<script>window.__INITIAL_DATA__ = ${JSON.stringify(initialData)};</script>`;
+        html = html.replace('</head>', `${dataScript}\n</head>`);
+        
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+      } catch (e) {
+        // Fallback to static file if anything fails
+        res.sendFile(path.join(staticPath, "index.html"));
+      }
     });
 
     const port = Number(process.env.PORT) || 3001;

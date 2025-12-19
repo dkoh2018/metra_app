@@ -12,9 +12,9 @@ import { SUPPORTED_LINES } from '@shared/constants';
 // Coordinates from GTFS stops.txt
 // Station definitions moved to @/lib/stations.ts
 
-// Map center - Focused between Palatine and Jefferson Park (Lat shifted North-West)
-// Map center - Shifted West to include Schaumburg (-88.11) and Palatine (-88.05)
-const MAP_CENTER: [number, number] = [42.05, -87.95];
+// Map center - Balanced to show all tracks
+const MAP_CENTER: [number, number] = [41.96, -87.83];
+const DEFAULT_ZOOM = 9.5;
 
 // Train data from the API
 interface TrainPosition {
@@ -279,7 +279,7 @@ function ResetZoomControl() {
     e.stopPropagation();
     e.preventDefault();
     // Reset to default center and zoom
-    map.setView(MAP_CENTER, 10);
+  map.setView(MAP_CENTER, DEFAULT_ZOOM);
   };
 
   return (
@@ -582,7 +582,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
       
         <MapContainer
           center={MAP_CENTER}
-          zoom={10}
+          zoom={DEFAULT_ZOOM}
           scrollWheelZoom={true}
           style={{ height: '100%', width: '100%', background: '#f4f4f5' }}
           zoomControl={true}
