@@ -195,7 +195,14 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     // Update metadata
     try {
       const publishedDatePath = path.join(GTFS_DIR, '..', 'published.txt');
-      let publishedDate = new Date().toISOString().split('T')[0]; // Default to today if file doesn't exist
+      // Use Chicago date for default published date (handle late night / UTC mismatch)
+      const now = new Date();
+      const chicagoDate = now.toLocaleString('en-US', {
+        timeZone: 'America/Chicago',
+        year: 'numeric', month: '2-digit', day: '2-digit'
+      }).replace(/(\d+)\/(\d+)\/(\d+)/, '$3-$1-$2'); // MM/DD/YYYY -> YYYY-MM-DD
+      
+      let publishedDate = chicagoDate; // Default to today in Chicago
       
       if (fs.existsSync(publishedDatePath)) {
         publishedDate = fs.readFileSync(publishedDatePath, 'utf-8').trim();
