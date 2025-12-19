@@ -250,10 +250,14 @@ async function scrapeAndCacheCrowding(
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
         executablePath,
-        timeout: 30000
+        timeout: 30000,
+        env: { ...process.env, TZ: 'America/Chicago' }
       });
       
       const page = await scrapeBrowser.newPage();
+      
+      // Force Chicago timezone for the page context
+      await page.emulateTimezone('America/Chicago');
       
       // Stealth: Hide webdriver property to bypass simple WAF checks
       await page.evaluateOnNewDocument(() => {
@@ -1138,6 +1142,7 @@ async function startServer() {
           }>;
           
           if (cachedData.length > 0) {
+            console.log('[DEBUG] First cached item:', JSON.stringify(cachedData[0]));
             const result = formatCachedData(cachedData);
             const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at).getTime()) / 1000 / 60);
             console.log(`[CACHE HIT] Returning cached crowding data for ${origin}->${destination} (${result.crowding.length} trains, ${cacheAge} min old)`);
