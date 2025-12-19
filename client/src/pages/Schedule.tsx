@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } fro
 import { Train } from '@/lib/scheduleData';
 import { ArrowRight, Clock, RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getChicagoTime, getServiceDayType, getCurrentMinutesInChicago, formatChicagoTime } from '@/lib/time';
+import { getCurrentMinutesInChicago } from '@/lib/time';
 
 // Refactored Imports
 import { DayType, Direction, CrowdingLevel, ApiTrain, ApiSchedule, ApiAlerts } from '@/types/schedule';
