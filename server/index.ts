@@ -94,7 +94,12 @@ async function ensureChromeExecutable(): Promise<string | null> {
         buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
         console.log(`Resolved Chrome build ID: ${buildId}`);
       } catch (idError: any) {
-        console.warn("Failed to resolve Build ID from Google, using fallback:", idError.message);
+        // Suppress known "Cannot read properties of undefined (reading 'match')" error from Puppeteer
+        if (idError.message && idError.message.includes('match') && idError.message.includes('undefined')) {
+             console.log("Could not resolve latest Chrome version from Google (likely network restriction), using fallback.");
+        } else {
+             console.warn("Failed to resolve Build ID from Google, using fallback:", idError.message);
+        }
         // Fallback to a known recent stable version (Mac/Linux compatible)
         buildId = '121.0.6167.85'; 
       }
@@ -179,6 +184,44 @@ async function startServer() {
             await loadGTFSIntoDatabase();
           }
           console.log("✅ Database initialized successfully");
+          
+          // Start intervals after DB and functions are ready
+          const apiToken = process.env.VITE_METRA_API_TOKEN;
+          
+          // Real-time updates
+          if (apiToken && updateRealtimeData) {
+             console.log("⏱️  Starting real-time data polling...");
+             // Initial update
+             updateRealtimeData(apiToken).catch((err: any) => console.error("Realtime init error:", err));
+             
+             // Server polling alignment
+             const now = new Date();
+             const msSinceLast30 = now.getTime() % 30000;
+             const msToNextSync = 30000 - msSinceLast30;
+             
+             setTimeout(() => {
+               const syncRealtimeData = async () => {
+                 try {
+                    await updateRealtimeData(apiToken);
+                 } catch (e: any) { console.error("Realtime sync error:", e.message); }
+               };
+               syncRealtimeData();
+               setInterval(syncRealtimeData, 30000);
+               console.log("⏱️  Server polling aligned to wall clock (:00/:30)");
+             }, msToNextSync);
+          }
+
+          // Weather updates
+          if (updateWeatherData) {
+             console.log("🌦️  Starting weather data polling...");
+             // Initial update
+             updateWeatherData().catch((err: any) => console.error("Weather init error:", err));
+             // Schedule
+             setInterval(() => {
+                 console.log("🌦️  Updating weather data...");
+                 updateWeatherData().catch((err: any) => console.error("Weather update error:", err.message));
+             }, 60 * 1000);
+          }
         } catch (dbError: any) {
           console.warn("⚠️  Database initialization skipped:", dbError.message);
           console.log("   Server will run without database features (schedule API will use static data)");
@@ -189,56 +232,7 @@ async function startServer() {
       }
     })();
 
-    // Real-time update interval (every 60 seconds) - only if database is available
-    const apiToken = process.env.VITE_METRA_API_TOKEN;
-    if (apiToken) {
-      const syncRealtimeData = async () => {
-        if (updateRealtimeData) {
-          try {
-            await updateRealtimeData(apiToken);
-          } catch (error: any) {
-            console.error("Error updating real-time data:", error.message);
-          }
-        }
-      };
 
-      // Calculate time to next 30s mark
-      const now = new Date();
-      const msSinceLast30 = now.getTime() % 30000;
-      const msToNextSync = 30000 - msSinceLast30;
-
-      console.log(`⏱️  Aligning server polling: Waiting ${Math.round(msToNextSync/1000)}s to sync with wall clock...`);
-
-      // Initial immediate update
-      if (updateRealtimeData) {
-        updateRealtimeData(apiToken).catch(console.error);
-      }
-      
-      // Schedule aligned updates
-      setTimeout(() => {
-        syncRealtimeData();
-        setInterval(syncRealtimeData, 30000);
-        console.log("⏱️  Server polling aligned to wall clock (:00/:30)");
-      }, msToNextSync);
-      
-      // Initial update (only if database available)
-      if (updateRealtimeData) {
-        updateRealtimeData(apiToken).catch(console.error);
-      }
-    }
-
-    // Weather update interval (every 10 minutes)
-    if (updateWeatherData) {
-        // Initial update
-        console.log("🌦️  Fetching initial weather data...");
-        updateWeatherData().catch((err: any) => console.error("Weather init error:", err));
-        
-        // Schedule updates
-        setInterval(() => {
-            console.log("🌦️  Updating weather data...");
-            updateWeatherData().catch((err: any) => console.error("Weather update error:", err));
-        }, 60 * 1000); // 1 minute
-    }
 
     const fetchData = async (endpoint: string, res: express.Response) => {
       try {
