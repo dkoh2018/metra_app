@@ -36,7 +36,8 @@ export function getMetraScheduleUrl({
   // - dest: Destination Station ID (GTFS ID)
   // - time: Unix timestamp for the desired schedule time
   // - allstops: 0 (default view), 1 (show all stops)
-  // - redirect: logic for their backend, seems to match time usually
+  // redirect: seems to prefer the current time of request (not the scheduled time)
+  const redirectTimestamp = Math.floor(Date.now() / 1000);
   
-  return `https://www.metra.com/schedules?line=${lineId}&orig=${orig}&dest=${dest}&time=${timestamp}&allstops=0&redirect=${timestamp}`;
+  return `https://www.metra.com/schedules?line=${lineId}&orig=${orig}&dest=${dest}&time=${timestamp}&allstops=0&redirect=${redirectTimestamp}`;
 }

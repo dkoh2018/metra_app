@@ -16,7 +16,9 @@ interface WeatherConfig {
 const LOCATIONS: WeatherConfig[] = [
   { name: 'Chicago', lat: 41.8781, lon: -87.6298 },
   { name: 'Palatine', lat: 42.1103, lon: -88.0342 },
-  { name: 'Schaumburg', lat: 42.0334, lon: -88.0834 }
+  { name: 'Schaumburg', lat: 42.0334, lon: -88.0834 },
+  { name: 'Wilmette', lat: 42.0773, lon: -87.7092 },
+  { name: 'Westmont', lat: 41.7956, lon: -87.9764 }
 ];
 
 export async function updateWeatherData(): Promise<void> {

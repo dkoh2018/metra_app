@@ -14,7 +14,7 @@ import { SUPPORTED_LINES } from '@shared/constants';
 
 // Map center - Balanced to show all tracks
 const MAP_CENTER: [number, number] = [41.96, -87.83];
-const DEFAULT_ZOOM = 9.5;
+const DEFAULT_ZOOM = 9;
 
 // Train data from the API
 interface TrainPosition {
@@ -707,10 +707,27 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                             const currentMinutes = now.getHours() * 60 + now.getMinutes();
                             
                             const [h, m] = stop.arrival_time.split(':').map(Number);
-                            const stopMinutes = h * 60 + m;
+                            let stopMinutes = h * 60 + m;
                             
-                            // If stop is in the past, hide it immediately
-                            // "Next Stops" means future stops
+                            // OVERNIGHT FIX: Handle GTFS 24:XX format and early morning viewing
+                            const EARLY_MORNING_CUTOFF = 4 * 60; // 4 AM = 240 minutes
+                            const EVENING_START = 18 * 60; // 6 PM = 1080 minutes
+                            const MIDNIGHT = 24 * 60; // 1440 minutes
+                            
+                            // If stopMinutes >= 1440, it's GTFS 24:XX format (tomorrow's early morning)
+                            // Only filter REAL evening times (18:00-23:59 = 1080-1439 minutes)
+                            if (currentMinutes < EARLY_MORNING_CUTOFF && 
+                                stopMinutes >= EVENING_START && 
+                                stopMinutes < MIDNIGHT) {
+                              return false; // This evening stop already passed yesterday
+                            }
+                            
+                            // Normalize GTFS 24:XX times for comparison when viewing after midnight
+                            if (currentMinutes < EARLY_MORNING_CUTOFF && stopMinutes >= MIDNIGHT) {
+                              stopMinutes -= MIDNIGHT; // Convert 24:40 to 00:40 for comparison
+                            }
+                            
+                            // If stop is in the past, hide it
                             return stopMinutes > currentMinutes;
                           }).map((stop, outputIndex) => {
                             // Find station name from our STATIONS list or fallback to GTFS ID logic

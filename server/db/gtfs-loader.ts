@@ -77,9 +77,9 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     
     // Load trips
     const trips = parseCSV(path.join(GTFS_DIR, 'trips.txt')) as unknown as Trip[];
-    // Filter for UP-NW and MD-W routes (Milwaukee District West)
-    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W' || t.route_id === 'UP-N');
-    console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W)`);
+    // Filter for UP-NW, MD-W, UP-N, and BNSF routes
+    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W' || t.route_id === 'UP-N' || t.route_id === 'BNSF');
+    console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W + UP-N + BNSF)`);
     
     // Load calendar
     const calendars = parseCSV(path.join(GTFS_DIR, 'calendar.txt')) as unknown as Calendar[];
@@ -115,7 +115,7 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     const tripIds = new Set(tripsByRoute.map(t => t.trip_id));
     const relevantStopTimes = stopTimes.filter(st => tripIds.has(st.trip_id));
     
-    console.log(`Found ${relevantStopTimes.length} stop times for UP-NW/MD-W trips`);
+    console.log(`Found ${relevantStopTimes.length} stop times for all supported lines`);
     
     // Group stop times by trip
     const stopTimesByTrip = new Map<string, StopTime[]>();

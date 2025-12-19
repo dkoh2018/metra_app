@@ -1,4 +1,4 @@
-export type LineId = 'UP-NW' | 'MD-W' | 'UP-N';
+export type LineId = 'UP-NW' | 'MD-W' | 'UP-N' | 'BNSF';
 
 export type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
 

@@ -16,12 +16,44 @@ let getDatabase: any;
 // Track ongoing scraping operations to prevent concurrent scrapes
 const scrapingLocks = new Map<string, Promise<any>>();
 
+// ============================================
+// TIME-BASED POLLING CONFIGURATION
+// ============================================
+// Active hours: 4 AM - 6 PM Chicago time (commute hours)
+// Off hours: 6 PM - 4 AM Chicago time (reduced polling)
+
+function isActiveHours(): boolean {
+  const now = new Date();
+  // Get Chicago time (handles DST automatically)
+  const chicagoHour = parseInt(now.toLocaleString('en-US', { 
+    timeZone: 'America/Chicago', 
+    hour: 'numeric', 
+    hour12: false 
+  }));
+  return chicagoHour >= 4 && chicagoHour < 18; // 4 AM to 6 PM
+}
+
+// Cache TTLs - different for active vs off hours
+const POSITIONS_CACHE_TTL = 15 * 1000; // 15 seconds (positions come from free GTFS API)
+
+// Crowding cache: 1 hour active, 4 hours off
+function getCrowdingCacheTTL(): number {
+  return isActiveHours() ? 60 * 60 * 1000 : 4 * 60 * 60 * 1000; // 1hr or 4hr
+}
+
+// Weather intervals: 15 min active, 30 min off  
+function getWeatherInterval(): number {
+  return isActiveHours() ? 15 * 60 * 1000 : 30 * 60 * 1000; // 15min or 30min
+}
+// ============================================
+
 // Cache for train positions (shared across all requests for instant page loads)
+// Unified positions cache - single bulk fetch for ALL lines
+// Key: 'all' - stores all train positions from one Metra API call
 const positionsCache = new Map<string, {
-  data: any;
+  data: any[];  // Array of all train positions
   timestamp: number;
 }>();
-const POSITIONS_CACHE_TTL = 10 * 1000; // 10 seconds for real-time feel
 
 // Cache for crowding data (shared across all requests for instant page loads)
 // Key format: "ORIGIN_DESTINATION_LINE" (e.g., "PALATINE_OTC_UP-NW")
@@ -161,6 +193,383 @@ async function ensureChromeExecutable(): Promise<string | null> {
   }
 }
 
+// Helper type
+type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
+
+// Reusable scraping function for both API requests and scheduled background tasks
+async function scrapeAndCacheCrowding(
+  origin: string, 
+  destination: string, 
+  lineId: string, 
+  source: string = 'API',
+  dateOverride?: Date
+) {
+  const cacheKey = `${origin}_${destination}_${lineId}`;
+  const startTime = Date.now();
+  console.log(`[${source}] Starting scraping for ${origin}->${destination} (Line: ${lineId})...`);
+
+  // Check if a scrape is already in progress
+  if (scrapingLocks.has(cacheKey)) {
+    console.log(`[${source}] Detailed scrape already in progress for ${cacheKey}, waiting for it...`);
+    return scrapingLocks.get(cacheKey);
+  }
+
+  const scrapePromise = (async () => {
+    let scrapeBrowser: any = null;
+    try {
+      const puppeteer = (await import("puppeteer")).default;
+      const executablePath = await ensureChromeExecutable();
+      
+      if (!executablePath) {
+        throw new Error("Chrome not available - crowding scraping disabled");
+      }
+      
+      let scheduleDate: number;
+
+      if (dateOverride) {
+        // Scheduled seed: Start at specific time (e.g., 4:00 AM) to capture full day
+        scheduleDate = Math.floor(dateOverride.getTime() / 1000);
+        console.log(`[${source}] Using overridden schedule date: ${dateOverride.toLocaleString()} (${scheduleDate})`);
+      } else {
+        // Normal request: "Now - 1 Hour" logic
+        const now = new Date();
+        scheduleDate = Math.floor(now.getTime() / 1000) - 3600;
+      }
+      
+      const { getMetraScheduleUrl } = await import("@shared/metra-urls");
+      
+      const url = getMetraScheduleUrl({
+        origin: String(origin),
+        destination: String(destination),
+        line: String(lineId),
+        date: scheduleDate * 1000 
+      });
+      console.log(`[${source}] Constructed URL: ${url}`);
+      
+      scrapeBrowser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        executablePath,
+        timeout: 30000
+      });
+      
+      const page = await scrapeBrowser.newPage();
+      
+      // Stealth: Hide webdriver property to bypass simple WAF checks
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+      
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+      });
+      
+      // Navigate
+      await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
+      
+      await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {});
+      
+      // Extract data (Same logic as before)
+      const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string) => {
+        type ClientCrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
+        
+        const resultsMap = new Map<string, any>();
+        
+        // Crowding extraction
+        const tripRows = Array.from(document.querySelectorAll('.trip-row'));
+        tripRows.forEach((tripCell: Element) => {
+          const tripId = tripCell.getAttribute('id');
+          if (!tripId) return;
+          
+          let crowding: ClientCrowdingLevel = 'low';
+          const container = tripCell.querySelector('.trip--crowding');
+          if (container) {
+            if (container.querySelector('.trip--crowding-high') || container.classList.contains('trip--crowding-high')) crowding = 'high';
+            else if (container.querySelector('.trip--crowding-moderate') || container.classList.contains('trip--crowding-moderate')) crowding = 'moderate';
+            else if (container.querySelector('.trip--crowding-some') || container.classList.contains('trip--crowding-some')) crowding = 'some';
+          }
+          
+          resultsMap.set(tripId, {
+            trip_id: tripId,
+            crowding,
+            scheduled_departure: null, // Populated next
+            estimated_departure: null,
+            scheduled_arrival: null,
+            estimated_arrival: null
+          });
+        });
+        
+        // Time/Delay extraction
+        const stopCells = Array.from(document.querySelectorAll('td.stop'));
+        stopCells.forEach((cell: Element) => {
+           const stopText = cell.querySelector('.stop--text');
+           const strikeOut = stopText?.querySelector('.strike-out');
+           if (!strikeOut) return; // No delay info
+           
+           const cellId = cell.getAttribute('id');
+           if (!cellId) return;
+           
+           const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W|UP-N|BNSF)_[A-Z0-9]+_V\d+_[A-Z])/);
+           if (!tripIdMatch) return;
+           const tripId = tripIdMatch[1];
+           
+           const isOriginStop = cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
+           const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
+           
+           const scheduledTime = strikeOut.textContent?.trim() || null;
+           const estimatedTime = (stopText?.textContent || '').replace(strikeOut.textContent || '', '').trim() || null;
+           
+           const existing = resultsMap.get(tripId);
+           if (existing) {
+             if (isOriginStop) {
+               existing.scheduled_departure = scheduledTime;
+               existing.estimated_departure = estimatedTime;
+             } else if (isDestStop) {
+               existing.scheduled_arrival = scheduledTime;
+               existing.estimated_arrival = estimatedTime;
+             }
+           }
+        });
+        
+        return { crowding: Array.from(resultsMap.values()) };
+      }, origin, destination);
+
+      if (!extractedData || !extractedData.crowding) {
+        throw new Error('No crowding data extracted');
+      }
+
+      // Save to Database (UPSERT)
+      const { getDatabase } = await import("./db/schema.js");
+      const db = getDatabase();
+      if (db) {
+         const transaction = db.transaction(() => {
+           const insert = db.prepare(`
+             INSERT OR REPLACE INTO crowding_cache 
+             (origin, destination, trip_id, crowding, 
+              scheduled_departure, predicted_departure, 
+              scheduled_arrival, predicted_arrival, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+           `);
+           
+           let savedCount = 0;
+           extractedData.crowding.forEach((item: any) => {
+             insert.run(
+               origin, destination, item.trip_id, item.crowding,
+               item.scheduled_departure, item.estimated_departure,
+               item.scheduled_arrival, item.estimated_arrival
+             );
+             savedCount++;
+           });
+           console.log(`[${source}] Saved/Updated ${savedCount} entries for ${origin}->${destination}`);
+         });
+         transaction();
+      }
+
+      if (extractedData.crowding.length === 0) {
+        console.warn(`[WARNING] No crowding data extracted from Metra website for ${origin}->${destination}`);
+        throw new Error('No crowding data extracted from Metra website');
+      }
+      
+      await scrapeBrowser.close();
+      
+      return { 
+        crowding: extractedData.crowding.map((item: any) => ({
+             trip_id: String(item.trip_id || ''),
+             crowding: String(item.crowding || 'low'),
+             scheduled_departure: item.scheduled_departure || null,
+             predicted_departure: item.estimated_departure || null,
+             scheduled_arrival: item.scheduled_arrival || null,
+             predicted_arrival: item.estimated_arrival || null
+        }))
+      };
+
+    } catch (error: any) {
+      if (scrapeBrowser) await scrapeBrowser.close().catch(() => {});
+      console.error(`[${source}] Scraping failed:`, error.message);
+      throw error;
+    }
+  })();
+
+  scrapingLocks.set(cacheKey, scrapePromise);
+  
+  try {
+    const result = await scrapePromise;
+    scrapingLocks.delete(cacheKey);
+    return result;
+  } catch (err) {
+    scrapingLocks.delete(cacheKey);
+    throw err;
+  }
+}
+
+
+// Scheduled Task: Daily Crowding Seed (3:30 AM Chicago Time)
+// Runs once per day to fetch FULL DAY crowding predictions for all active routes
+function scheduleDailyScrapes() {
+  const runScheduledScrape = async () => {
+    console.log("⏰ [SCHEDULE] Starting daily crowding seed (3:30 AM)...");
+    
+    // 1. Identify active routes from recent cache usage
+    const db = getDatabase();
+    if (!db) {
+      console.warn("⏰ [SCHEDULE] Database not available, skipping scheduled scrape");
+      return;
+    }
+    
+    // Get distinct origin-destination pairs that have been queried in the last 7 days
+    // This ensures we only scrape relevant routes effectively
+    const activeRoutes = db.prepare(`
+      SELECT DISTINCT origin, destination, trip_id 
+      FROM crowding_cache 
+      WHERE updated_at > datetime('now', '-7 days')
+    `).all() as Array<{origin: string, destination: string, trip_id: string}>;
+    
+    // Group by unique origin/dest/line to avoid duplicate scrapes
+    // We infer line from trip_id (e.g. BNSF_..., UP-NW_...)
+    const uniquePairs = new Set<string>();
+    const scrapeQueue: Array<{origin: string, destination: string, line: string}> = [];
+    
+    activeRoutes.forEach(r => {
+      let line = '';
+      if (r.trip_id.startsWith('BNSF')) line = 'BNSF';
+      else if (r.trip_id.startsWith('UP-NW')) line = 'UP-NW';
+      else if (r.trip_id.startsWith('UP-N')) line = 'UP-N';
+      else if (r.trip_id.startsWith('MD-W')) line = 'MD-W';
+      
+      if (line) {
+        const key = `${r.origin}|${r.destination}|${line}`;
+        if (!uniquePairs.has(key)) {
+          uniquePairs.add(key);
+          scrapeQueue.push({ origin: r.origin, destination: r.destination, line });
+        }
+      }
+    });
+
+    // 2. Ensure the 4 key highlighted stations are ALWAYS seeded (Inbound & Outbound)
+    // This guarantees data availability for the main user flows even if cache is empty
+    const keyRoutes = [
+      { origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' },
+      { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' },
+      { origin: 'SCHAUM', destination: 'CUS', line: 'MD-W' },
+      { origin: 'CUS', destination: 'SCHAUM', line: 'MD-W' },
+      { origin: 'WILMETTE', destination: 'OTC', line: 'UP-N' },
+      { origin: 'OTC', destination: 'WILMETTE', line: 'UP-N' },
+      { origin: 'WESTMONT', destination: 'CUS', line: 'BNSF' },
+      { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' }
+    ];
+
+    keyRoutes.forEach(route => {
+      const key = `${route.origin}|${route.destination}|${route.line}`;
+      if (!uniquePairs.has(key)) {
+        console.log(`⏰ [SCHEDULE] Adding priority route: ${route.origin}->${route.destination}`);
+        uniquePairs.add(key);
+        scrapeQueue.push(route);
+      }
+    });
+
+    // Also add defaults if empty (cold start) - though keyRoutes handles this now
+    if (scrapeQueue.length === 0) {
+      console.log("⏰ [SCHEDULE] No active routes found, adding defaults...");
+      scrapeQueue.push({ origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' });
+    }
+    
+    console.log(`⏰ [SCHEDULE] Found ${scrapeQueue.length} routes to seed:`, scrapeQueue.map(q => `${q.origin}->${q.destination}`).join(', '));
+    
+    // Process queue in parallel chunks to speed up seeding
+    const CONCURRENCY = 3;
+    console.log(`⏰ [SCHEDULE] Processing ${scrapeQueue.length} routes with concurrency ${CONCURRENCY}...`);
+    
+    for (let i = 0; i < scrapeQueue.length; i += CONCURRENCY) {
+      const chunk = scrapeQueue.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async (task) => {
+        const { origin, destination, line } = task;
+        // Use tomorrow's date at 4:00 AM (Chicago time) to ensure we get the full day's schedule
+        // 4 AM is a safe start time
+        const targetDate = new Date();
+        targetDate.setDate(targetDate.getDate() + 1);
+        targetDate.setHours(4, 0, 0, 0); // 4:00 AM
+        
+        console.log(`[SCHEDULED] Starting scraping for ${origin}->${destination} (Line: ${line})...`);
+        
+        try {
+          await scrapeAndCacheCrowding(
+            origin, 
+            destination, 
+            line, 
+            'SCHEDULED', // Source
+            targetDate   // Date override
+          );
+          console.log(`[SCHEDULED] Completed scraping for ${origin}->${destination}`);
+        } catch (error) {
+          console.error(`[SCHEDULED] Failed daily scrape for ${origin}->${destination}:`, error);
+        }
+      }));
+    }
+    
+    console.log("⏰ [SCHEDULE] Daily seed completed!");
+  };
+
+  const scheduleNextRun = () => {
+    const now = new Date();
+    const chicagoTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
+    const chicagoNow = new Date(chicagoTimeStr);
+    
+    // Target: 3:30 AM Chicago time
+    const target = new Date(chicagoNow);
+    target.setHours(3, 30, 0, 0);
+    
+    // If 3:30 AM has passed today, schedule for tomorrow
+    if (target.getTime() <= chicagoNow.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    
+    const msUntilRun = target.getTime() - chicagoNow.getTime();
+    console.log(`⏰ [SCHEDULE] Next daily scrape scheduled for ${target.toLocaleString()} (in ${Math.round(msUntilRun/1000/60/60)} hours)`);
+    
+    setTimeout(() => {
+      runScheduledScrape();
+      scheduleNextRun(); // Re-schedule for next day
+    }, msUntilRun);
+  };
+  
+  // Start the scheduling loop
+  // SMART COLD START: Check if we have data before forcing a seed
+  const dbCheck = getDatabase();
+  if (dbCheck) {
+    try {
+      // Check for RECENT data (within last 24 hours)
+      const result = dbCheck.prepare(`
+        SELECT COUNT(*) as count FROM crowding_cache 
+        WHERE updated_at > datetime('now', '-24 hours')
+      `).get() as { count: number };
+      
+      const count = result?.count || 0;
+      console.log(`⏰ [SCHEDULE] Startup check: Found ${count} valid crowding entries in database.`);
+      
+      if (count < 5) {
+        // Cold start - mostly empty DB
+        console.log("❄️ [SCHEDULE] Cold start detected (low data). Triggering immediate initial seed...");
+        runScheduledScrape();
+      } else {
+        // Warm start - data exists
+        console.log("✅ [SCHEDULE] Data exists. Skipping immediate seed to save resources.");
+      }
+    } catch (err: any) {
+      console.warn("⚠️ [SCHEDULE] Could not verify DB state, defaulting to standard schedule:", err.message);
+    }
+  } else {
+    // If no DB, we can't really do anything, but try running anyway?
+    // Probably best to just let the schedule handle it
+  }
+
+  scheduleNextRun();
+}
+
 async function startServer() {
   try {
     const app = express();
@@ -200,6 +609,9 @@ async function startServer() {
           const { initDatabase } = dbModule;
           initDatabase();
           
+          // Start the daily scheduled scrape task
+          scheduleDailyScrapes();
+          
           if (shouldUpdateGTFS()) {
             console.log("Loading GTFS data into database...");
             await loadGTFSIntoDatabase();
@@ -232,16 +644,25 @@ async function startServer() {
              }, msToNextSync);
           }
 
-          // Weather updates
+          // Weather updates - dynamic interval based on active hours
           if (updateWeatherData) {
-             console.log("🌦️  Starting weather data polling...");
+             console.log("🌦️  Starting weather data polling (dynamic interval)...");
              // Initial update
              updateWeatherData().catch((err: any) => console.error("Weather init error:", err));
-             // Schedule
-             setInterval(() => {
+             
+             // Dynamic scheduling - recalculates interval each time
+             const scheduleWeatherUpdate = () => {
+               const interval = getWeatherInterval();
+               const intervalMin = Math.round(interval / 1000 / 60);
+               console.log(`🌦️  Next weather update in ${intervalMin} min (active=${isActiveHours()})`);
+               
+               setTimeout(() => {
                  console.log("🌦️  Updating weather data...");
                  updateWeatherData().catch((err: any) => console.error("Weather update error:", err.message));
-             }, 60 * 1000);
+                 scheduleWeatherUpdate(); // Re-schedule with potentially different interval
+               }, interval);
+             };
+             scheduleWeatherUpdate();
           }
         } catch (dbError: any) {
           console.warn("⚠️  Database initialization skipped:", dbError.message);
@@ -297,98 +718,80 @@ async function startServer() {
     app.get("/api/positions/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W', 'UP-N'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }
 
         const now = Date.now();
-        const cache = positionsCache.get(lineId);
+        const cache = positionsCache.get('all');
         
-        // Serve from cache if fresh
+        // Check if we have fresh cached data for ALL lines
+        let allTrains: any[] = [];
+        
         if (cache && (now - cache.timestamp < POSITIONS_CACHE_TTL)) {
-          return res.json(cache.data);
-        }
+          // Use cached data
+          allTrains = cache.data;
+        } else {
+          // Fetch fresh data from Metra API (SINGLE CALL for all lines)
+          const axios = (await import("axios")).default;
+          const GtfsRealtimeBindings = (await import("gtfs-realtime-bindings")).default;
 
-        const axios = (await import("axios")).default;
-        const GtfsRealtimeBindings = (await import("gtfs-realtime-bindings")).default;
+          const token = process.env.VITE_METRA_API_TOKEN;
+          const url = `https://gtfspublic.metrarr.com/gtfs/public/positions`;
 
-        const token = process.env.VITE_METRA_API_TOKEN;
-        const url = `https://gtfspublic.metrarr.com/gtfs/public/positions`;
-
-        const response = await axios.get(url, {
-          responseType: "arraybuffer",
-          params: { api_token: token }
-        });
-
-        const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(response.data));
-        
-        const body = GtfsRealtimeBindings.transit_realtime.FeedMessage.toObject(feed, {
-          longs: String,
-          enums: String,
-          bytes: String,
-        });
-
-        // Filter for specific line trains only and add direction info
-        const lineTrains = body.entity
-          .filter((entity: any) => entity.vehicle?.trip?.routeId === lineId)
-          .map((entity: any) => {
-            const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace(/\D/g, '') || 'Unknown';
-            const trainNum = parseInt(trainNumber);
-            const direction = !isNaN(trainNum) ? (trainNum % 2 === 0 ? 'inbound' : 'outbound') : 'unknown';
-            
-            return {
-              id: entity.id,
-              trainNumber,
-              tripId: entity.vehicle?.trip?.tripId,
-              latitude: entity.vehicle?.position?.latitude,
-              longitude: entity.vehicle?.position?.longitude,
-              bearing: entity.vehicle?.position?.bearing,
-              timestamp: entity.vehicle?.timestamp,
-              vehicleId: entity.vehicle?.vehicle?.id,
-              direction,
-            };
+          const response = await axios.get(url, {
+            responseType: "arraybuffer",
+            params: { api_token: token }
           });
+
+          const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(response.data));
+          
+          const body = GtfsRealtimeBindings.transit_realtime.FeedMessage.toObject(feed, {
+            longs: String,
+            enums: String,
+            bytes: String,
+          });
+
+          // Process ALL trains from all lines (single API parse)
+          allTrains = body.entity
+            .filter((entity: any) => entity.vehicle?.trip?.routeId && validLines.includes(entity.vehicle.trip.routeId))
+            .map((entity: any) => {
+              const trainNumber = entity.vehicle?.vehicle?.label || entity.vehicle?.trip?.tripId?.split('_')[1]?.replace(/\D/g, '') || 'Unknown';
+              const trainNum = parseInt(trainNumber);
+              const direction = !isNaN(trainNum) ? (trainNum % 2 === 0 ? 'inbound' : 'outbound') : 'unknown';
+              
+              return {
+                id: entity.id,
+                trainNumber,
+                tripId: entity.vehicle?.trip?.tripId,
+                routeId: entity.vehicle?.trip?.routeId, // Store route for filtering
+                latitude: entity.vehicle?.position?.latitude,
+                longitude: entity.vehicle?.position?.longitude,
+                bearing: entity.vehicle?.position?.bearing,
+                timestamp: entity.vehicle?.timestamp,
+                vehicleId: entity.vehicle?.vehicle?.id,
+                direction,
+              };
+            });
+
+          // Update unified cache (stores ALL lines together)
+          positionsCache.set('all', {
+            data: allTrains,
+            timestamp: now
+          });
+          
+          console.log(`[POSITIONS] Bulk cached ${allTrains.length} trains across all lines`);
+        }
+        
+        // Filter for requested line only
+        const lineTrains = allTrains.filter((t: any) => t.routeId === lineId);
         
         const responseData = {
           trains: lineTrains,
           timestamp: new Date().toISOString(),
           count: lineTrains.length
         };
-
-        // Update cache for this line
-        positionsCache.set(lineId, {
-          data: responseData,
-          timestamp: now
-        });
-        
-        // Save to database if available and save param is set
-        const shouldSave = req.query.save === 'true';
-        if (shouldSave && getDatabase) {
-          try {
-            const db = getDatabase();
-            const insert = db.prepare(`
-              INSERT INTO train_positions (train_number, trip_id, vehicle_id, latitude, longitude, bearing, direction, timestamp)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            
-            for (const train of lineTrains) {
-              insert.run(
-                train.trainNumber,
-                train.tripId,
-                train.vehicleId,
-                train.latitude,
-                train.longitude,
-                train.bearing,
-                train.direction,
-                train.timestamp
-              );
-            }
-            console.log(`Saved ${lineTrains.length} train positions to database`);
-          } catch (dbError: any) {
-            console.warn("Could not save positions to database:", dbError.message);
-          }
-        }
         
         res.json(responseData);
       } catch (error: any) {
@@ -427,7 +830,7 @@ async function startServer() {
     app.get("/api/shapes/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W', 'UP-N'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }
@@ -453,13 +856,13 @@ async function startServer() {
           
           const [shape_id, lat_str, lng_str] = line.split(",");
           
-          if (shape_id === ibShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_IB'))) {
+          if (shape_id === ibShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_IB')) || (lineId === 'BNSF' && shape_id.startsWith('BNSF_IB'))) {
             const lat = parseFloat(lat_str);
             const lng = parseFloat(lng_str);
             if (!isNaN(lat) && !isNaN(lng)) {
               inboundPoints.push([lat, lng]);
             }
-          } else if (shape_id === obShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_OB'))) {
+          } else if (shape_id === obShapeId || (lineId === 'MD-W' && shape_id.startsWith('MD-W_OB')) || (lineId === 'BNSF' && shape_id.startsWith('BNSF_OB'))) {
             const lat = parseFloat(lat_str);
             const lng = parseFloat(lng_str);
             if (!isNaN(lat) && !isNaN(lng)) {
@@ -715,14 +1118,16 @@ async function startServer() {
         };
         
         if (!forceRefresh) {
+          // Dynamic cache TTL: 1 hour during active hours, 4 hours off-hours
+          const cacheTTLMinutes = Math.round(getCrowdingCacheTTL() / 1000 / 60);
           const cachedData = db.prepare(`
             SELECT trip_id, crowding, 
                    scheduled_departure, predicted_departure,
                    scheduled_arrival, predicted_arrival, updated_at
             FROM crowding_cache
             WHERE origin = ? AND destination = ?
-              AND updated_at > datetime('now', '-5 minutes')
-          `).all(origin, destination) as Array<{
+              AND updated_at > datetime('now', '-' || ? || ' minutes')
+          `).all(origin, destination, cacheTTLMinutes) as Array<{
             trip_id: string;
             crowding: string | null;
             scheduled_departure: string | null;
@@ -782,442 +1187,13 @@ async function startServer() {
           console.log(`[CACHE] No stale cache available for ${origin}->${destination}`);
         }
         
-        const scrapePromise = (async () => {
-          let scrapeBrowser: any = null;
-          try {
-            const puppeteer = (await import("puppeteer")).default;
-            const executablePath = await ensureChromeExecutable();
-            
-            // If Chrome is not available, throw to trigger fallback
-            if (!executablePath) {
-              throw new Error("Chrome not available - crowding scraping disabled");
-            }
-            
-            let firstTrainTimestamp: number;
-
-              // Fix for Railway/UTC servers: Use "Now - 1 Hour" logic
-              // 1. Solves Timezone Bug: Date.now() is universal, so subtracting 1 hour always gives "1 hour ago" in absolute time, matching Chicago time correctly.
-              // 2. Optimization: Fetches only relevant/active trains instead of the entire day history, preventing timeouts and null data.
-              const now = new Date();
-              firstTrainTimestamp = Math.floor(now.getTime() / 1000) - 3600;
-              
-              const chicagoTime = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
-              console.log(`[CROWDING] Start Time: ${firstTrainTimestamp} (Now - 1h). Server Now (Chicago): ${chicagoTime}`);
-            
-
-            
-            const { getMetraScheduleUrl } = await import("@shared/metra-urls");
-            
-            const url = getMetraScheduleUrl({
-              origin: String(origin),
-              destination: String(destination),
-              line: String(lineId),
-              date: firstTrainTimestamp * 1000 // Convert back to ms for the helper
-            });
-            
-            scrapeBrowser = await puppeteer.launch({
-              headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox'],
-              executablePath,
-              timeout: 30000
-            });
-            
-            if (!scrapeBrowser.isConnected()) {
-              throw new Error('Browser disconnected (server may have restarted)');
-            }
-            
-            const page = await scrapeBrowser.newPage();
-            
-            // Force Desktop Viewport (1920x1080) to ensure we get the full table layout
-            // Railway defaults to 800x600 which triggers mobile view, breaking selectors
-            await page.setViewport({ width: 1920, height: 1080 });
-            await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            
-            try {
-              if (page.isClosed()) {
-                throw new Error('Page was closed before navigation');
-              }
-              
-              await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
-            } catch (gotoError: any) {
-              if (gotoError.message.includes('detached') || gotoError.message.includes('Target closed')) {
-                console.warn(`Browser/page was detached (likely due to server restart): ${gotoError.message}`);
-                throw new Error('Browser was disconnected during scraping (server may have restarted)');
-              }
-              console.warn(`Page navigation timeout or error: ${gotoError.message}`);
-              throw new Error(`Failed to load Metra schedule page: ${gotoError.message}`);
-            }
-            
-            await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {
-              console.warn('Trip rows not found after timeout, continuing anyway');
-            });
-            
-            if (page.isClosed()) {
-              throw new Error('Page was closed before data extraction');
-            }
-            
-            const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string) => {
-              type CrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
-              
-              // Map to store results by trip_id
-              const resultsMap = new Map<string, {
-                trip_id: string;
-                crowding: CrowdingLevel;
-                scheduled_departure: string | null;
-                estimated_departure: string | null;
-                scheduled_arrival: string | null;
-                estimated_arrival: string | null;
-              }>();
-              
-              const debug: string[] = [];
-              debug.push(`[SCRAPER] Starting extraction for ${scrapeOrigin} -> ${scrapeDest}`);
-              debug.push(`[SCRAPER] Looking for cell IDs containing: "${scrapeOrigin.toUpperCase()}" (origin) and "${scrapeDest.toUpperCase()}" (dest)`);
-              
-              // First: Extract crowding from .trip-row elements
-              const tripRows = Array.from(document.querySelectorAll('.trip-row'));
-              if (tripRows.length > 0) {
-                 const firstIds = tripRows.slice(0, 3).map(r => r.getAttribute('id')).filter(Boolean);
-                 debug.push(`[TRIP ROWS] Found ${tripRows.length} trip rows. Sample IDs: ${firstIds.join(', ')}`);
-              } else {
-                 debug.push('[TRIP ROWS] WARNING: No .trip-row elements found!');
-                 // Log body content to debug selector failure
-                 debug.push(`[TRIP ROWS] Body preview: ${document.body.innerHTML.substring(0, 500)}...`);
-              }
-              
-              tripRows.forEach((tripCell: Element) => {
-                const tripId = tripCell.getAttribute('id');
-                if (!tripId) return;
-                
-                const crowdingContainer = tripCell.querySelector('.trip--crowding');
-                let crowding: CrowdingLevel = 'low';
-                
-                if (crowdingContainer) {
-                  if (crowdingContainer.querySelector('.trip--crowding-high') || 
-                      crowdingContainer.classList.contains('trip--crowding-high')) {
-                    crowding = 'high';
-                  } else if (crowdingContainer.querySelector('.trip--crowding-moderate') ||
-                             crowdingContainer.classList.contains('trip--crowding-moderate')) {
-                    crowding = 'moderate';
-                  } else if (crowdingContainer.querySelector('.trip--crowding-some') ||
-                             crowdingContainer.classList.contains('trip--crowding-some')) {
-                    crowding = 'some';
-                  }
-                }
-                
-                resultsMap.set(tripId, {
-                  trip_id: tripId,
-                  crowding,
-                  scheduled_departure: null,
-                  estimated_departure: null,
-                  scheduled_arrival: null,
-                  estimated_arrival: null
-                });
-              });
-              
-              // Second: Extract estimated times from ALL td.stop elements (don't rely on has-exception class)
-              // These have IDs like "UP-NW_UNW672_V3_APALATINE" (trip_id + "_" + stop)
-              const estimatedStops = Array.from(document.querySelectorAll('td.stop'));
-              debug.push(`[STOP CELLS] Found ${estimatedStops.length} total stop cells`);
-              
-              // Count how many match our origin/dest
-              const originMatches = estimatedStops.filter(cell => {
-                const cellId = cell.getAttribute('id') || '';
-                return cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
-              }).length;
-              const destMatches = estimatedStops.filter(cell => {
-                const cellId = cell.getAttribute('id') || '';
-                return cellId.toUpperCase().includes(scrapeDest.toUpperCase());
-              }).length;
-              debug.push(`[STOP CELLS] Matches: ${originMatches} with "${scrapeOrigin.toUpperCase()}", ${destMatches} with "${scrapeDest.toUpperCase()}"`);
-              
-              estimatedStops.forEach((cell: Element, index: number) => {
-                // Check if this cell has a strike-through time (indicating delay/change)
-                // We access the text container first
-                const stopText = cell.querySelector('.stop--text');
-                if (!stopText) return;
-
-                const strikeOut = stopText.querySelector('.strike-out');
-                // If there's no strike-out, there's no estimated time update to process
-                if (!strikeOut) return;
-
-                const cellId = cell.getAttribute('id');
-                if (!cellId) return;
-                
-                // Extract trip_id by removing the stop suffix (e.g., "_APALATINE", "_OTC", "_PALATINE")
-                // Trip IDs look like: UP-NW_UNW672_V3_A or MD-W_MW2254_V2_A or UP-N_UN377_V1_A
-                // Cell IDs look like: UP-NW_UNW672_V3_APALATINE or MD-W_MW2254_V2_ASCHAUM
-                const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W|UP-N)_[A-Z0-9]+_V\d+_[A-Z])/);
-                if (!tripIdMatch) return;
-                const tripId = tripIdMatch[1];
-                
-                // Determine if this is departure (origin) or arrival (dest) based on cell ID
-                // Use the actual origin/dest passed from the scraper (case insensitive)
-                const isOriginStop = cellId.toUpperCase().includes(scrapeOrigin.toUpperCase());
-                const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
-                
-                // Debug logging for first few matches to verify station matching works
-                if (index < 3 && (isOriginStop || isDestStop)) {
-                  debug.push(`[MATCH] CellId: ${cellId} | Origin: ${scrapeOrigin} (${isOriginStop ? 'MATCH' : 'no'}) | Dest: ${scrapeDest} (${isDestStop ? 'MATCH' : 'no'})`);
-                }
-                
-                // Get the estimated time from the cell
-                // We already have stopText and strikeOut from above
-                
-                const scheduledTime = strikeOut.textContent?.trim() || null;
-                // Estimated time is the text after the strikeout
-                const fullText = stopText.textContent || '';
-                const strikeText = strikeOut.textContent || '';
-                const estimatedTime = fullText.replace(strikeText, '').trim() || null;
-                
-                // Update the results map
-                const existing = resultsMap.get(tripId);
-                if (existing) {
-                  if (isOriginStop) {
-                    existing.scheduled_departure = scheduledTime;
-                    existing.estimated_departure = estimatedTime;
-                    debug.push(`Updated departure for ${tripId}: ${scheduledTime} -> ${estimatedTime}`);
-                  } else if (isDestStop) {
-                    existing.scheduled_arrival = scheduledTime;
-                    existing.estimated_arrival = estimatedTime;
-                    debug.push(`Updated arrival for ${tripId}: ${scheduledTime} -> ${estimatedTime}`);
-                  } else {
-                     if (index < 5) debug.push(`Trip ${tripId} match but not origin/dest. CellId: ${cellId}`);
-                  }
-                } else {
-                     if (index < 5) debug.push(`Trip ${tripId} not found in resultsMap`);
-                }
-              });
-
-              // Final Summary with detailed breakdown
-              const crowdingFound = Array.from(resultsMap.values()).filter(r => r.crowding !== 'low').length;
-              const estimatesFound = Array.from(resultsMap.values()).filter(r => r.estimated_departure || r.estimated_arrival).length;
-              const withDepartureEst = Array.from(resultsMap.values()).filter(r => r.estimated_departure).length;
-              const withArrivalEst = Array.from(resultsMap.values()).filter(r => r.estimated_arrival).length;
-              
-              debug.push(`SCRAPER SUMMARY: Total Trips: ${resultsMap.size}`);
-              debug.push(`  └─ Crowding Updates: ${crowdingFound} (low: ${resultsMap.size - crowdingFound}, some/moderate/high: ${crowdingFound})`);
-              debug.push(`  └─ Estimated Times: ${estimatesFound} total (departures: ${withDepartureEst}, arrivals: ${withArrivalEst})`);
-              debug.push(`  └─ Origin: ${scrapeOrigin}, Dest: ${scrapeDest}`);
-              
-              return { crowding: Array.from(resultsMap.values()), debug };
-            }, origin, destination);
-
-
-            if (extractedData.debug && extractedData.debug.length > 0) {
-                console.log("SCRAPER DEBUG LOGS:\n" + extractedData.debug.join('\n'));
-            }
-            
-            // Add defensive checks and logging
-            if (!extractedData) {
-              throw new Error('No data returned from page.evaluate()');
-            }
-            
-            if (!extractedData.crowding) {
-              console.error(`[ERROR] extractedData.crowding is missing. extractedData keys: ${Object.keys(extractedData).join(', ')}`);
-              throw new Error('Crowding data missing from extraction result');
-            }
-            
-            if (!Array.isArray(extractedData.crowding)) {
-              console.error(`[ERROR] extractedData.crowding is not an array. Type: ${typeof extractedData.crowding}, Value: ${JSON.stringify(extractedData.crowding).substring(0, 200)}`);
-              throw new Error('Crowding data is not an array');
-            }
-            
-            if (extractedData.crowding.length === 0) {
-              console.warn(`[WARNING] No crowding data extracted from Metra website for ${origin}->${destination}`);
-              throw new Error('No crowding data extracted from Metra website');
-            }
-            
-            console.log(`[CROWDING] Extracted data for ${origin}->${destination} (${extractedData.crowding.length} trains)`);
-            
-            // Count statistics
-            const withCrowding = extractedData.crowding.filter((item: any) => item.crowding !== 'low').length;
-            const withEstimates = extractedData.crowding.filter(
-              (item: any) => item.estimated_departure || item.estimated_arrival
-            ).length;
-            const withDepartureEst = extractedData.crowding.filter((item: any) => item.estimated_departure).length;
-            const withArrivalEst = extractedData.crowding.filter((item: any) => item.estimated_arrival).length;
-            
-            console.log(`  └─ Crowding levels: ${withCrowding} non-low (${extractedData.crowding.length - withCrowding} low)`);
-            if (withEstimates > 0) {
-              console.log(`  └─ Estimated times: ${withEstimates} trains (${withDepartureEst} departures, ${withArrivalEst} arrivals)`);
-            }
-            
-            // Show sample for debugging (first train with non-low crowding or estimates)
-            const sampleTrain = extractedData.crowding.find((item: any) => 
-              item.crowding !== 'low' || item.estimated_departure || item.estimated_arrival
-            ) || extractedData.crowding[0];
-            
-            if (sampleTrain) {
-              console.log(`  └─ Sample: ${sampleTrain.trip_id} | Crowding: ${sampleTrain.crowding} | ` +
-                `Dep: ${sampleTrain.scheduled_departure}${sampleTrain.estimated_departure ? ` -> ${sampleTrain.estimated_departure}` : ''} | ` +
-                `Arr: ${sampleTrain.scheduled_arrival}${sampleTrain.estimated_arrival ? ` -> ${sampleTrain.estimated_arrival}` : ''}`);
-            }
-            
-            console.log(`[CROWDING] About to save to database for ${origin}->${destination}...`);
-            const { getDatabase: getDbForCache } = await import("./db/schema.js");
-            let dbForCache;
-            try {
-              dbForCache = getDbForCache();
-              console.log(`[CROWDING] Database connection obtained for ${origin}->${destination}`);
-              
-              // Test database write capability
-              try {
-                dbForCache.prepare('SELECT 1').get();
-                console.log(`[CROWDING] Database connection verified for ${origin}->${destination}`);
-              } catch (testError: any) {
-                console.error(`[ERROR] Database connection test failed for ${origin}->${destination}: ${testError.message}`);
-                throw new Error(`Database connection invalid: ${testError.message}`);
-              }
-            } catch (dbInitError: any) {
-              console.error(`[ERROR] Failed to get database connection for ${origin}->${destination}: ${dbInitError.message}`);
-              console.error(`[ERROR] Stack: ${dbInitError.stack}`);
-              // Continue without caching - still return the data
-              dbForCache = null;
-            }
-            
-            if (dbForCache) {
-              try {
-                console.log(`[CROWDING] Preparing database insert for ${origin}->${destination} (${extractedData.crowding.length} items)...`);
-                const insertCache = dbForCache.prepare(`
-                  INSERT OR REPLACE INTO crowding_cache 
-                  (origin, destination, trip_id, crowding, 
-                   scheduled_departure, predicted_departure, 
-                   scheduled_arrival, predicted_arrival, updated_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                `);
-                
-                console.log(`[CROWDING] Starting transaction for ${origin}->${destination}...`);
-                const transaction = dbForCache.transaction(() => {
-                  console.log(`[CROWDING] Deleting old cache entries for ${origin}->${destination}...`);
-                  dbForCache.prepare(`
-                    DELETE FROM crowding_cache 
-                    WHERE origin = ? AND destination = ? AND updated_at < datetime('now', '-24 hours')
-                  `).run(origin, destination);
-                  
-                  console.log(`[CROWDING] Inserting ${extractedData.crowding.length} cache entries for ${origin}->${destination}...`);
-                  extractedData.crowding.forEach((item: {
-                    trip_id: string;
-                    crowding: CrowdingLevel;
-                    scheduled_departure: string | null;
-                    estimated_departure: string | null;
-                    scheduled_arrival: string | null;
-                    estimated_arrival: string | null;
-                  }, index: number) => {
-                    try {
-                      insertCache.run(
-                        origin,
-                        destination,
-                        item.trip_id,
-                        item.crowding,
-                        item.scheduled_departure,
-                        item.estimated_departure,
-                        item.scheduled_arrival,
-                        item.estimated_arrival
-                      );
-                      if (index < 3) {
-                        console.log(`[CROWDING] Inserted cache entry ${index + 1}/${extractedData.crowding.length}: ${item.trip_id} (${item.crowding})`);
-                      }
-                    } catch (insertError: any) {
-                      console.error(`[ERROR] Failed to insert cache entry for ${item.trip_id}: ${insertError.message}`);
-                      throw insertError;
-                    }
-                  });
-                });
-                
-                console.log(`[CROWDING] Executing transaction for ${origin}->${destination}...`);
-                transaction();
-                const savedCount = extractedData.crowding.length;
-                console.log(`[CACHE SAVE] Saved ${savedCount} entries to database for ${origin}->${destination} (using INSERT OR REPLACE - updates existing, no duplicates)`);
-              
-              // Verify no duplicates exist (should always be 0 due to unique constraint)
-              const duplicateCheck = dbForCache.prepare(`
-                SELECT origin, destination, trip_id, COUNT(*) as count
-                FROM crowding_cache
-                WHERE origin = ? AND destination = ?
-                GROUP BY origin, destination, trip_id
-                HAVING count > 1
-              `).all(origin, destination);
-              
-              if (duplicateCheck.length > 0) {
-                console.warn(`[CACHE WARNING] Found ${duplicateCheck.length} duplicate entries for ${origin}->${destination} (this should not happen!)`);
-              } else {
-                console.log(`[CACHE VERIFY] No duplicates found for ${origin}->${destination} (unique constraint working correctly)`);
-              }
-              
-              // Show cache statistics for this origin/destination
-              const cacheStats = dbForCache.prepare(`
-                SELECT COUNT(*) as total, 
-                       MIN(updated_at) as oldest,
-                       MAX(updated_at) as newest
-                FROM crowding_cache
-                WHERE origin = ? AND destination = ?
-              `).get(origin, destination) as { total: number; oldest: string; newest: string };
-              
-                if (cacheStats) {
-                  console.log(`[CACHE STATS] ${origin}->${destination}: ${cacheStats.total} total entries (oldest: ${cacheStats.oldest}, newest: ${cacheStats.newest})`);
-                }
-              } catch (cacheError: any) {
-                console.error(`[ERROR] Failed to cache data for ${origin}->${destination}: ${cacheError.message}`);
-                console.error(`[ERROR] Stack: ${cacheError.stack}`);
-                // Don't throw - we still want to return the data even if caching fails
-              }
-            } else {
-              console.warn(`[WARNING] Database not available, skipping cache save for ${origin}->${destination} (data will still be returned)`);
-            }
-            
-            console.log(`[CROWDING] About to close browser and return data for ${origin}->${destination}...`);
-            if (scrapeBrowser && scrapeBrowser.isConnected()) {
-              try {
-                await scrapeBrowser.close();
-              } catch (closeError: any) {
-                if (!closeError.message.includes('Target closed') && 
-                    !closeError.message.includes('Session closed') &&
-                    !closeError.message.includes('Connection closed')) {
-                  console.warn('Error closing browser:', closeError.message);
-                }
-              }
-            }
-            
-            console.log(`[CROWDING] Returning ${extractedData.crowding.length} crowding entries for ${origin}->${destination}`);
-            
-            // Ensure all data is properly serializable
-            const result = {
-              crowding: extractedData.crowding.map((item: any) => ({
-                trip_id: String(item.trip_id || ''),
-                crowding: String(item.crowding || 'low'),
-                scheduled_departure: item.scheduled_departure ? String(item.scheduled_departure) : null,
-                predicted_departure: item.estimated_departure ? String(item.estimated_departure) : null,
-                scheduled_arrival: item.scheduled_arrival ? String(item.scheduled_arrival) : null,
-                predicted_arrival: item.estimated_arrival ? String(item.estimated_arrival) : null
-              }))
-            };
-            
-            console.log(`[CROWDING] Result prepared with ${result.crowding.length} entries, returning for ${origin}->${destination}`);
-            console.log(`[CROWDING] Sample entry: ${JSON.stringify(result.crowding[0] || {}).substring(0, 200)}`);
-            return result;
-          } catch (scrapeError: any) {
-            if (scrapeBrowser && scrapeBrowser.isConnected()) {
-              try {
-                await scrapeBrowser.close();
-              } catch (closeError: any) {
-                if (!closeError.message.includes('Target closed') && 
-                    !closeError.message.includes('Session closed') &&
-                    !closeError.message.includes('Connection closed')) {
-                  console.warn('Error closing browser:', closeError.message);
-                }
-              }
-            }
-            
-            if (scrapeError.message.includes('detached') || 
-                scrapeError.message.includes('disconnected') || 
-                scrapeError.message.includes('Target closed') ||
-                scrapeError.message.includes('Session closed')) {
-              throw new Error('Browser was disconnected during scraping (server may have restarted)');
-            }
-            
-            throw scrapeError;
-          }
-        })();
+        // Use reusable function for both API and scheduled scrapes
+        const scrapePromise = scrapeAndCacheCrowding(
+          origin as string, 
+          destination as string, 
+          lineId as string,
+          'API'
+        );
         
         scrapingLocks.set(cacheKey, scrapePromise);
         

@@ -22,7 +22,7 @@ export const OVERNIGHT_CONFIG = {
   LATE_NIGHT_START: 20 * 60,       // 8 PM = 1200 minutes
   SERVICE_DAY_START: 60,           // 1 AM = 60 minutes (Metra service day boundary)
   OVERNIGHT_CUTOFF: 60,            // 1 AM boundary
-  MAX_REASONABLE_WAIT: 20 * 60,    // 20 hours - anything longer is probably stale data
+  MAX_REASONABLE_WAIT: 26 * 60,    // 26 hours - increased to allow 1AM -> 11PM same-day lookahead
   MINUTES_PER_DAY: 24 * 60,        // 1440 minutes
 };
 
@@ -87,10 +87,10 @@ export function hasTrainDeparted(trainMinutes: number, currentMinutes: number): 
     return false;
   }
   
-  // Early morning viewing, evening train → already departed yesterday
-  if (isEarlyMorning(currentMinutes) && isEveningTrain(trainMinutes)) {
-    return true;
-  }
+  // Early morning viewing, evening train → REMOVED (Viewing 'Today's' schedule means these are future)
+  /* if (isEarlyMorning(currentMinutes) && isEveningTrain(trainMinutes)) {
+    return true; 
+  } */
   
   // Late night viewing, early morning train → these are upcoming "tonight" trains
   if (isLateNight(currentMinutes) && isEarlyMorningTrain(trainMinutes)) {
@@ -119,10 +119,10 @@ export function getMinutesUntilTrain(trainMinutes: number, currentMinutes: numbe
     return minutesUntil;
   }
   
-  // Early morning viewing, evening train → already departed
-  if (isEarlyMorning(currentMinutes) && isEveningTrain(trainMinutes)) {
+  // Early morning viewing, evening train → REMOVED (Viewing 'Today's' schedule means these are future)
+  /* if (isEarlyMorning(currentMinutes) && isEveningTrain(trainMinutes)) {
     return null;
-  }
+  } */
   
   // Late night viewing, early morning train → add 24 hours for proper calculation
   if (isLateNight(currentMinutes) && isEarlyMorningTrain(trainMinutes)) {
@@ -162,11 +162,6 @@ export function getAdjustedTrainMinutes(trainMinutes: number, currentMinutes: nu
     }
     // Late night - keep as-is (future train)
     return trainMinutes;
-  }
-  
-  // Early morning viewing, evening train → mark as departed (-1)
-  if (isEarlyMorning(currentMinutes) && isEveningTrain(trainMinutes)) {
-    return -1;
   }
   
   // Late night viewing, early morning train → add 24h for proper sorting
