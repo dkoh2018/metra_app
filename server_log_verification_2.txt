@@ -1,0 +1,77 @@
+
+> metra-schedule-tracker@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[dotenv@17.2.3] injecting env (2) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+Found 1966 trips (UP-NW + MD-W + UP-N + BNSF)
+Found 35482 stop times for all supported lines
+Inserted 3932 schedule records
+GTFS data loaded successfully!
+⏰ [SCHEDULE] Forcing immediate daily seed for verification...
+⏰ [SCHEDULE] Starting daily crowding seed (3:30 AM)...
+⏰ [SCHEDULE] No active routes found, adding defaults...
+⏰ [SCHEDULE] Found 2 routes to seed: PALATINE->OTC, OTC->PALATINE
+[SCHEDULED] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+⏰ [SCHEDULE] Next daily scrape scheduled for 12/19/2025, 3:30:00 AM (in 2 hours)
+📅 GTFS: Data is just updated, no update needed
+✅ Database initialized successfully
+⏱️  Starting real-time data polling...
+🌦️  Starting weather data polling (dynamic interval)...
+🌦️  Next weather update in 30 min (active=false)
+✅ Using Puppeteer's bundled Chrome at: /Users/davidoh/.cache/puppeteer/chrome/mac_arm-143.0.7499.42/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+[SCHEDULED] Using overridden schedule date: 12/19/2025, 4:00:00 AM (1766138400)
+⚠️  Port 3001 is in use (PID: 42320), attempting to free it (attempt 1/3)...
+Real-time data updated successfully
+✅ Port 3001 freed
+✅ Weather data updated for 3 locations
+✅ Backend server running on http://localhost:3001/
+📡 API endpoints available at http://localhost:3001/api/*
+⏱️  Server polling aligned to wall clock (:00/:30)
+[POSITIONS] Bulk cached 6 trains across all lines
+[POSITIONS] Bulk cached 6 trains across all lines
+[POSITIONS] Bulk cached 6 trains across all lines
+[POSITIONS] Bulk cached 6 trains across all lines
+Real-time data updated successfully
+[API] [1766128051074-c3dqykcf1] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766128051074-c3dqykcf1] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE MISS] No fresh cache for PALATINE->OTC (checking for stale cache or scraping...)
+Scraping already in progress for PALATINE->OTC, waiting...
+[SCHEDULED] Saved/Updated 0 entries for PALATINE->OTC
+[API] [1766128051074-c3dqykcf1] Request completed in 3646ms
+[SCHEDULED] Starting scraping for OTC->PALATINE (Line: UP-NW)...
+[SCHEDULED] Using overridden schedule date: 12/19/2025, 4:00:00 AM (1766138400)
+[SCHEDULED] Saved/Updated 0 entries for OTC->PALATINE
+[API] [1766128079326-exif66o71] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766128079326-exif66o71] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE MISS] No fresh cache for PALATINE->OTC (checking for stale cache or scraping...)
+[CACHE MISS] No fresh cache (< 5 min) for PALATINE->OTC, checking stale cache or scraping...
+[CACHE] No stale cache available for PALATINE->OTC
+[API] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[API] [1766128079326-exif66o71] Waiting for scraping promise to complete for PALATINE->OTC...
+[POSITIONS] Bulk cached 5 trains across all lines
+[POSITIONS] Bulk cached 5 trains across all lines
+[POSITIONS] Bulk cached 5 trains across all lines
+[POSITIONS] Bulk cached 5 trains across all lines
+[POSITIONS] Bulk cached 5 trains across all lines
+Real-time data updated successfully
+⏰ [SCHEDULE] Daily seed completed!
+[API] Saved/Updated 0 entries for PALATINE->OTC
+[API] [1766128079326-exif66o71] Scraping completed for PALATINE->OTC, result has 0 entries
+[API] [1766128079326-exif66o71] Sending JSON response for PALATINE->OTC...
+[API] [1766128079326-exif66o71] Sending response after 11606ms (0 entries)
+[API] [1766128079326-exif66o71] Request completed in 11606ms
+[API] [1766128093556-smqh1r3vs] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766128093556-smqh1r3vs] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE MISS] No fresh cache for PALATINE->OTC (checking for stale cache or scraping...)
+[CACHE MISS] No fresh cache (< 5 min) for PALATINE->OTC, checking stale cache or scraping...
+[CACHE] No stale cache available for PALATINE->OTC
+[API] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[API] [1766128093556-smqh1r3vs] Waiting for scraping promise to complete for PALATINE->OTC...
+[API] Saved/Updated 0 entries for PALATINE->OTC
+[API] [1766128093556-smqh1r3vs] Scraping completed for PALATINE->OTC, result has 0 entries
+[API] [1766128093556-smqh1r3vs] Sending JSON response for PALATINE->OTC...
+[API] [1766128093556-smqh1r3vs] Sending response after 11589ms (0 entries)
+[API] [1766128093556-smqh1r3vs] Request completed in 11589ms

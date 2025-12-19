@@ -1,0 +1,37 @@
+
+> metra-schedule-tracker@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[dotenv@17.2.3] injecting env (2) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+Found 1966 trips (UP-NW + MD-W + UP-N + BNSF)
+Found 35482 stop times for all supported lines
+Inserted 3932 schedule records
+GTFS data loaded successfully!
+⏰ [SCHEDULE] Startup check: Found 370 valid crowding entries in database.
+✅ [SCHEDULE] Data exists. Skipping immediate seed to save resources.
+⏰ [SCHEDULE] Next daily scrape scheduled for 12/19/2025, 3:30:00 AM (in 2 hours)
+📅 GTFS: Data is just updated, no update needed
+✅ Database initialized successfully
+⏱️  Starting real-time data polling...
+🌦️  Starting weather data polling (dynamic interval)...
+🌦️  Next weather update in 30 min (active=false)
+Real-time data updated successfully
+✅ Backend server running on http://localhost:3001/
+📡 API endpoints available at http://localhost:3001/api/*
+✅ Weather data updated for 5 locations
+⏱️  Server polling aligned to wall clock (:00/:30)
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766129591153-n1yxwmsqd] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766129591153-n1yxwmsqd] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for PALATINE->OTC (51 trains, -344 min old)
+[API] [1766129591153-n1yxwmsqd] Request completed in 1ms
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully

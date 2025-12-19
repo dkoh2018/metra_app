@@ -1,0 +1,139 @@
+
+> metra-schedule-tracker@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[dotenv@17.2.3] injecting env (2) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+Found 1966 trips (UP-NW + MD-W + UP-N + BNSF)
+Found 35482 stop times for all supported lines
+Inserted 3932 schedule records
+GTFS data loaded successfully!
+⏰ [SCHEDULE] Forcing immediate daily seed for verification (ALL STATIONS)...
+⏰ [SCHEDULE] Starting daily crowding seed (3:30 AM)...
+⏰ [SCHEDULE] Found 8 routes to seed: PALATINE->OTC, OTC->WILMETTE, OTC->PALATINE, WILMETTE->OTC, CUS->SCHAUM, SCHAUM->CUS, WESTMONT->CUS, CUS->WESTMONT
+⏰ [SCHEDULE] Processing 8 routes with concurrency 3...
+[SCHEDULED] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[SCHEDULED] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[SCHEDULED] Starting scraping for OTC->WILMETTE (Line: UP-N)...
+[SCHEDULED] Starting scraping for OTC->WILMETTE (Line: UP-N)...
+[SCHEDULED] Starting scraping for OTC->PALATINE (Line: UP-NW)...
+[SCHEDULED] Starting scraping for OTC->PALATINE (Line: UP-NW)...
+⏰ [SCHEDULE] Next daily scrape scheduled for 12/19/2025, 3:30:00 AM (in 2 hours)
+📅 GTFS: Data is just updated, no update needed
+✅ Database initialized successfully
+⏱️  Starting real-time data polling...
+🌦️  Starting weather data polling (dynamic interval)...
+🌦️  Next weather update in 30 min (active=false)
+✅ Using Puppeteer's bundled Chrome at: /Users/davidoh/.cache/puppeteer/chrome/mac_arm-143.0.7499.42/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-NW&orig=PALATINE&dest=OTC&time=1766224800&allstops=0&redirect=1766129060
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-N&orig=OTC&dest=WILMETTE&time=1766224800&allstops=0&redirect=1766129060
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-NW&orig=OTC&dest=PALATINE&time=1766224800&allstops=0&redirect=1766129060
+Real-time data updated successfully
+✅ Weather data updated for 3 locations
+✅ Backend server running on http://localhost:3001/
+📡 API endpoints available at http://localhost:3001/api/*
+[SCHEDULED] Saved/Updated 17 entries for OTC->PALATINE
+[SCHEDULED] Saved/Updated 16 entries for PALATINE->OTC
+[SCHEDULED] Completed scraping for OTC->PALATINE
+[SCHEDULED] Completed scraping for PALATINE->OTC
+[SCHEDULED] Saved/Updated 15 entries for OTC->WILMETTE
+[SCHEDULED] Completed scraping for OTC->WILMETTE
+[SCHEDULED] Starting scraping for WILMETTE->OTC (Line: UP-N)...
+[SCHEDULED] Starting scraping for WILMETTE->OTC (Line: UP-N)...
+[SCHEDULED] Starting scraping for CUS->SCHAUM (Line: MD-W)...
+[SCHEDULED] Starting scraping for CUS->SCHAUM (Line: MD-W)...
+[SCHEDULED] Starting scraping for SCHAUM->CUS (Line: MD-W)...
+[SCHEDULED] Starting scraping for SCHAUM->CUS (Line: MD-W)...
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-N&orig=WILMETTE&dest=OTC&time=1766224800&allstops=0&redirect=1766129068
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=MD-W&orig=CUS&dest=SCHAUM&time=1766224800&allstops=0&redirect=1766129068
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=MD-W&orig=SCHAUM&dest=CUS&time=1766224800&allstops=0&redirect=1766129068
+⏱️  Server polling aligned to wall clock (:00/:30)
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[SCHEDULED] Saved/Updated 12 entries for SCHAUM->CUS
+[SCHEDULED] Completed scraping for SCHAUM->CUS
+[SCHEDULED] Saved/Updated 12 entries for CUS->SCHAUM
+[SCHEDULED] Completed scraping for CUS->SCHAUM
+[SCHEDULED] Saved/Updated 15 entries for WILMETTE->OTC
+[SCHEDULED] Completed scraping for WILMETTE->OTC
+[SCHEDULED] Starting scraping for WESTMONT->CUS (Line: BNSF)...
+[SCHEDULED] Starting scraping for WESTMONT->CUS (Line: BNSF)...
+[SCHEDULED] Starting scraping for CUS->WESTMONT (Line: BNSF)...
+[SCHEDULED] Starting scraping for CUS->WESTMONT (Line: BNSF)...
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=BNSF&orig=WESTMONT&dest=CUS&time=1766224800&allstops=0&redirect=1766129077
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=BNSF&orig=CUS&dest=WESTMONT&time=1766224800&allstops=0&redirect=1766129077
+[SCHEDULED] Saved/Updated 18 entries for WESTMONT->CUS
+[SCHEDULED] Completed scraping for WESTMONT->CUS
+[SCHEDULED] Saved/Updated 18 entries for CUS->WESTMONT
+[SCHEDULED] Completed scraping for CUS->WESTMONT
+⏰ [SCHEDULE] Daily seed completed!
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766129115280-y7irbcgnx] Crowding request: SCHAUM->CUS (force=undefined)
+[API] [1766129115280-y7irbcgnx] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for SCHAUM->CUS (32 trains, -354 min old)
+[API] [1766129115280-y7irbcgnx] Request completed in 3ms
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766129175275-bvsush44f] Crowding request: SCHAUM->CUS (force=undefined)
+[API] [1766129175275-bvsush44f] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for SCHAUM->CUS (32 trains, -353 min old)
+[API] [1766129175275-bvsush44f] Request completed in 2ms
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766129235277-j8hvofpbc] Crowding request: SCHAUM->CUS (force=undefined)
+[API] [1766129235277-j8hvofpbc] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for SCHAUM->CUS (32 trains, -352 min old)
+[API] [1766129235277-j8hvofpbc] Request completed in 1ms
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766129295274-iscsx2a6k] Crowding request: SCHAUM->CUS (force=undefined)
+[API] [1766129295274-iscsx2a6k] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for SCHAUM->CUS (32 trains, -351 min old)
+[API] [1766129295274-iscsx2a6k] Request completed in 2ms
+[POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
