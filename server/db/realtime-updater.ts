@@ -67,7 +67,7 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
       INSERT INTO realtime_updates 
       (trip_id, stop_id, scheduled_arrival, scheduled_departure, 
        predicted_arrival, predicted_departure, delay_seconds, update_timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(trip_id, stop_id, update_timestamp) DO UPDATE SET
         scheduled_arrival = excluded.scheduled_arrival,
         scheduled_departure = excluded.scheduled_departure,
@@ -79,8 +79,17 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
     const insertHistorical = db.prepare(`
       INSERT OR REPLACE INTO historical_delays
       (date, trip_id, stop_id, scheduled_time, actual_time, delay_seconds, recorded_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+    
+    const now = new Date();
+    // Chicago time for timestamps
+    const chicagoTime = now.toLocaleString('en-US', {
+      timeZone: 'America/Chicago',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    }).replace(/(\d+)\/(\d+)\/(\d+),/, '$3-$1-$2'); // YYYY-MM-DD HH:MM:SS
     
     const chicagoDate = getChicagoDateString();
     
@@ -135,7 +144,8 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
               scheduledDeparture ? new Date(parseInt(scheduledDeparture) * 1000).toISOString() : null,
               predictedArrival ? new Date(parseInt(predictedArrival) * 1000).toISOString() : null,
               predictedDeparture ? new Date(parseInt(predictedDeparture) * 1000).toISOString() : null,
-              delaySeconds
+              delaySeconds,
+              chicagoTime
             );
             
             // Save to historical delays if we have the data
@@ -150,7 +160,8 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
                 stopId,
                 scheduledTimeStr,
                 actualTimeStr,
-                delaySeconds
+                delaySeconds,
+                chicagoTime
               );
             }
           }
