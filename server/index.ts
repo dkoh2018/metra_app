@@ -492,11 +492,25 @@ function scheduleDailyScrapes() {
       const chunk = scrapeQueue.slice(i, i + CONCURRENCY);
       await Promise.all(chunk.map(async (task) => {
         const { origin, destination, line } = task;
+        
         // Use tomorrow's date at 4:00 AM (Chicago time) to ensure we get the full day's schedule
         // 4 AM is a safe start time
-        const targetDate = new Date();
-        targetDate.setDate(targetDate.getDate() + 1);
-        targetDate.setHours(4, 0, 0, 0); // 4:00 AM
+        
+        // Use the difference between UTC and Chicago time to calculate "Chicago 4 AM" as a UTC Date object
+        const nowUtc = new Date();
+        const chiTimeStr = nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago' });
+        const chiTime = new Date(chiTimeStr);
+        const diff = nowUtc.getTime() - chiTime.getTime(); // Offset in ms
+        
+        // Construct "Local 4 AM" date (which is 4 AM UTC on server)
+        const local4am = new Date();
+        local4am.setDate(local4am.getDate() + 1);
+        local4am.setHours(4, 0, 0, 0);
+        
+        // Add the difference back to get the absolute time that corresponds to Chicago 4 AM
+        const absolute4amChicago = new Date(local4am.getTime() + diff); 
+        
+        const targetDate = absolute4amChicago;
         
         console.log(`[SCHEDULED] Starting scraping for ${origin}->${destination} (Line: ${line})...`);
         
