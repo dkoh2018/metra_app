@@ -273,19 +273,35 @@ async function scrapeAndCacheCrowding(
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
       });
       
+      // DEBUG: Forward browser console logs to server terminal
+      page.on('console', (msg: any) => console.log(`[BROWSER_LOG] ${msg.type().toUpperCase()}: ${msg.text()}`));
+      
       // Navigate
       await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
       
-      await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {});
+      // DEBUG: Check if page loaded correctly
+      const pageTitle = await page.title();
+      console.log(`[DEBUG_SCRAPE] Page loaded: "${pageTitle}"`);
+      
+      await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {
+        console.warn(`[DEBUG_SCRAPE] Timed out waiting for .trip-row selector`);
+      });
       
       // Extract data (Same logic as before)
-      const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string) => {
+      const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string, scheduleDate: number) => {
+        // DEBUG: Log Environment inside Browser
+        console.log(`[DEBUG_BROWSER] Browser Date: ${new Date().toString()}`);
+        console.log(`[DEBUG_BROWSER] Browser Timezone Offset: ${new Date().getTimezoneOffset()}`);
+        console.log(`[DEBUG_BROWSER] Target Schedule Date: ${new Date(scheduleDate * 1000).toString()}`);
+        
         type ClientCrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
         
         const resultsMap = new Map<string, any>();
         
         // Crowding extraction
         const tripRows = Array.from(document.querySelectorAll('.trip-row'));
+        console.log(`[DEBUG_BROWSER] Found ${tripRows.length} .trip-row elements`);
+        
         tripRows.forEach((tripCell: Element) => {
           const tripId = tripCell.getAttribute('id');
           if (!tripId) return;
@@ -310,9 +326,23 @@ async function scrapeAndCacheCrowding(
         
         // Time/Delay extraction
         const stopCells = Array.from(document.querySelectorAll('td.stop'));
+        let debugLogCount = 0;
+        
         stopCells.forEach((cell: Element) => {
            const stopText = cell.querySelector('.stop--text');
            const strikeOut = stopText?.querySelector('.strike-out');
+           
+           // DEBUG: Log first few cells html to verify structure
+           if (debugLogCount < 3) {
+             const cellId = cell.getAttribute('id') || 'no-id';
+             if (cellId.includes(scrapeOrigin) || cellId.includes(scrapeDest)) {
+               console.log(`[DEBUG_BROWSER] Checking cell ${cellId}:`);
+               console.log(`[DEBUG_BROWSER]   HTML: ${cell.innerHTML.substring(0, 200)}...`);
+               console.log(`[DEBUG_BROWSER]   StrikeOut Found: ${!!strikeOut}`);
+               debugLogCount++;
+             }
+           }
+           
            if (!strikeOut) return; // No delay info
            
            const cellId = cell.getAttribute('id');
@@ -328,6 +358,11 @@ async function scrapeAndCacheCrowding(
            const scheduledTime = strikeOut.textContent?.trim() || null;
            const estimatedTime = (stopText?.textContent || '').replace(strikeOut.textContent || '', '').trim() || null;
            
+           // DEBUG: Log if we found a delay
+           if (isOriginStop || isDestStop) {
+             console.log(`[DEBUG_BROWSER] Found Delay Info for ${tripId}: Sch=${scheduledTime}, Est=${estimatedTime}`);
+           }
+           
            const existing = resultsMap.get(tripId);
            if (existing) {
              if (isOriginStop) {
@@ -340,12 +375,25 @@ async function scrapeAndCacheCrowding(
            }
         });
         
-        return { crowding: Array.from(resultsMap.values()) };
-      }, origin, destination);
+        // Debug output size
+        const results = Array.from(resultsMap.values());
+        console.log(`[DEBUG_BROWSER] Extracted ${results.length} total trips`);
+        
+        return { crowding: results };
+      }, origin, destination, scheduleDate);
 
       if (!extractedData || !extractedData.crowding) {
+        console.error(`[DEBUG_SCRAPE] Extraction returned null or missing crowding`);
         throw new Error('No crowding data extracted');
       }
+      
+      // DEBUG: Log what we are about to save
+      console.log(`[DEBUG_SCRAPE] Extracted Data Summary:`);
+      extractedData.crowding.forEach((item: any, idx: number) => {
+        if (idx < 5) { // Log first 5
+          console.log(`[DEBUG_SCRAPE] Trip ${item.trip_id}: Crowding=${item.crowding}, Dep=${item.scheduled_departure}->${item.predicted_departure || 'OnTime'}`);
+        }
+      });
 
       // Save to Database (UPSERT)
       const { getDatabase } = await import("./db/schema.js");
