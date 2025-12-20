@@ -469,11 +469,11 @@ async function scrapeAndCacheCrowding(
 }
 
 
-// Scheduled Task: Daily Crowding Seed (3:30 AM Chicago Time)
+// Scheduled Task: Daily Crowding Seed (4:05 AM Chicago Time)
 // Runs once per day to fetch FULL DAY crowding predictions for all active routes
 function scheduleDailyScrapes() {
   const runScheduledScrape = async () => {
-    console.log("⏰ [SCHEDULE] Starting daily crowding seed (3:30 AM)...");
+    console.log("⏰ [SCHEDULE] Starting daily crowding seed (4:05 AM)...");
     
     // 1. Identify active routes from recent cache usage
     const db = getDatabase();
@@ -585,9 +585,9 @@ function scheduleDailyScrapes() {
     const chicagoTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
     const chicagoNow = new Date(chicagoTimeStr);
     
-    // Target: 3:30 AM Chicago time
+    // Target: 4:05 AM Chicago time
     const target = new Date(chicagoNow);
-    target.setHours(3, 30, 0, 0);
+    target.setHours(4, 5, 0, 0);
     
     // If 3:30 AM has passed today, schedule for tomorrow
     if (target.getTime() <= chicagoNow.getTime()) {
