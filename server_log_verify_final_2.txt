@@ -1,0 +1,67 @@
+
+> metra-schedule-tracker@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[dotenv@17.2.3] injecting env (2) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+SqliteError: database disk image is malformed
+    at Database.pragma (/Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/better-sqlite3@12.5.0/node_modules/better-sqlite3/lib/methods/pragma.js:10:27)
+    at initDatabase (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:52:6)
+    at loadGTFSIntoDatabase (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:701:14)
+    at server/db/gtfs-loader.ts (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:810:7)
+    at __init (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:4:56)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1293:68
+    at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1293:32 {
+  code: 'SQLITE_CORRUPT'
+}
+⚠️  Database initialization skipped: database disk image is malformed
+   Server will run without database features (schedule API will use static data)
+✅ Backend server running on http://localhost:3001/
+📡 API endpoints available at http://localhost:3001/api/*
+[API] [1766130868599-1txyg0f1b] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766130868599-1txyg0f1b] Railway env check - NODE_ENV: production, PORT: undefined
+[API ERROR] [1766130868599-1txyg0f1b] Error fetching crowding data after 0ms for PALATINE->OTC: database disk image is malformed
+[API ERROR] [1766130868599-1txyg0f1b] Stack: SqliteError: database disk image is malformed
+    at Database.pragma (/Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/better-sqlite3@12.5.0/node_modules/better-sqlite3/lib/methods/pragma.js:10:27)
+    at getDatabase (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:203:14)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1681:14
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[API] [1766130868599-1txyg0f1b] Sending response after 1ms (0 entries)
+[API] [1766130868599-1txyg0f1b] Request completed in 2ms
+Error fetching delays: database disk image is malformed
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[API] [1766130898135-tharas68b] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766130898135-tharas68b] Railway env check - NODE_ENV: production, PORT: undefined
+[API ERROR] [1766130898135-tharas68b] Error fetching crowding data after 2ms for PALATINE->OTC: database disk image is malformed
+[API ERROR] [1766130898135-tharas68b] Stack: SqliteError: database disk image is malformed
+    at Database.pragma (/Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/better-sqlite3@12.5.0/node_modules/better-sqlite3/lib/methods/pragma.js:10:27)
+    at getDatabase (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:203:14)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1681:14
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[API] [1766130898135-tharas68b] Sending response after 3ms (0 entries)
+[API] [1766130898135-tharas68b] Request completed in 4ms
+Error fetching weather: database disk image is malformed
+Error fetching delays: database disk image is malformed
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+Error fetching delays: database disk image is malformed
+Error fetching schedule: database disk image is malformed
+[API] [1766130926451-atbfsf6wy] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766130926451-atbfsf6wy] Railway env check - NODE_ENV: production, PORT: undefined
+[API ERROR] [1766130926451-atbfsf6wy] Error fetching crowding data after 0ms for PALATINE->OTC: database disk image is malformed
+[API ERROR] [1766130926451-atbfsf6wy] Stack: SqliteError: database disk image is malformed
+    at Database.pragma (/Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/better-sqlite3@12.5.0/node_modules/better-sqlite3/lib/methods/pragma.js:10:27)
+    at getDatabase (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:203:14)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1681:14
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[API] [1766130926451-atbfsf6wy] Sending response after 0ms (0 entries)
+[API] [1766130926451-atbfsf6wy] Request completed in 1ms
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+[POSITIONS] Bulk cached 3 trains across all lines
+Error fetching delays: database disk image is malformed

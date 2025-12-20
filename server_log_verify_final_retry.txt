@@ -1,0 +1,142 @@
+
+> metra-schedule-tracker@1.0.0 start
+> NODE_ENV=production node dist/index.js
+
+[dotenv@17.2.3] injecting env (2) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+Found 1966 trips (UP-NW + MD-W + UP-N + BNSF)
+Found 35482 stop times for all supported lines
+Inserted 3932 schedule records
+GTFS data loaded successfully!
+⏰ [SCHEDULE] Startup check: Found 3 valid crowding entries in database.
+❄️ [SCHEDULE] Cold start detected (low data). Triggering immediate initial seed...
+⏰ [SCHEDULE] Starting daily crowding seed (3:30 AM)...
+⏰ [SCHEDULE] Adding priority route: OTC->PALATINE
+⏰ [SCHEDULE] Adding priority route: SCHAUM->CUS
+⏰ [SCHEDULE] Adding priority route: CUS->SCHAUM
+⏰ [SCHEDULE] Adding priority route: WILMETTE->OTC
+⏰ [SCHEDULE] Adding priority route: OTC->WILMETTE
+⏰ [SCHEDULE] Adding priority route: WESTMONT->CUS
+⏰ [SCHEDULE] Adding priority route: CUS->WESTMONT
+⏰ [SCHEDULE] Found 8 routes to seed: PALATINE->OTC, OTC->PALATINE, SCHAUM->CUS, CUS->SCHAUM, WILMETTE->OTC, OTC->WILMETTE, WESTMONT->CUS, CUS->WESTMONT
+⏰ [SCHEDULE] Processing 8 routes with concurrency 3...
+[SCHEDULED] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[SCHEDULED] Starting scraping for PALATINE->OTC (Line: UP-NW)...
+[SCHEDULED] Starting scraping for OTC->PALATINE (Line: UP-NW)...
+[SCHEDULED] Starting scraping for OTC->PALATINE (Line: UP-NW)...
+[SCHEDULED] Starting scraping for SCHAUM->CUS (Line: MD-W)...
+[SCHEDULED] Starting scraping for SCHAUM->CUS (Line: MD-W)...
+⏰ [SCHEDULE] Next daily scrape scheduled for 12/19/2025, 3:30:00 AM (in 2 hours)
+📅 GTFS: Data is just updated, no update needed
+✅ Database initialized successfully
+⏱️  Starting real-time data polling...
+🌦️  Starting weather data polling (dynamic interval)...
+🌦️  Next weather update in 30 min (active=false)
+✅ Using Puppeteer's bundled Chrome at: /Users/davidoh/.cache/puppeteer/chrome/mac_arm-143.0.7499.42/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-NW&orig=PALATINE&dest=OTC&time=1766224800&allstops=0&redirect=1766131045
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-NW&orig=OTC&dest=PALATINE&time=1766224800&allstops=0&redirect=1766131045
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=MD-W&orig=SCHAUM&dest=CUS&time=1766224800&allstops=0&redirect=1766131045
+✅ Backend server running on http://localhost:3001/
+📡 API endpoints available at http://localhost:3001/api/*
+✅ Weather data updated for 5 locations
+Real-time data updated successfully
+⏱️  Server polling aligned to wall clock (:00/:30)
+Real-time data updated successfully
+[SCHEDULED] Saved/Updated 12 entries for SCHAUM->CUS
+[SCHEDULED] Saved/Updated 17 entries for OTC->PALATINE
+[SCHEDULED] Completed scraping for SCHAUM->CUS
+[SCHEDULED] Completed scraping for OTC->PALATINE
+[SCHEDULED] Saved/Updated 16 entries for PALATINE->OTC
+[SCHEDULED] Completed scraping for PALATINE->OTC
+[SCHEDULED] Starting scraping for CUS->SCHAUM (Line: MD-W)...
+[SCHEDULED] Starting scraping for CUS->SCHAUM (Line: MD-W)...
+[SCHEDULED] Starting scraping for WILMETTE->OTC (Line: UP-N)...
+[SCHEDULED] Starting scraping for WILMETTE->OTC (Line: UP-N)...
+[SCHEDULED] Starting scraping for OTC->WILMETTE (Line: UP-N)...
+[SCHEDULED] Starting scraping for OTC->WILMETTE (Line: UP-N)...
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=MD-W&orig=CUS&dest=SCHAUM&time=1766224800&allstops=0&redirect=1766131052
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-N&orig=WILMETTE&dest=OTC&time=1766224800&allstops=0&redirect=1766131052
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=UP-N&orig=OTC&dest=WILMETTE&time=1766224800&allstops=0&redirect=1766131052
+[SCHEDULED] Scraping failed: Navigating frame was detached
+[SCHEDULED] Failed daily scrape for CUS->SCHAUM: Error: Navigating frame was detached
+    at <instance_members_initializer> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:33:14)
+    at new LifecycleWatcher (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:37:16)
+    at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:145:29)
+    at CdpFrame.<anonymous> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/util/decorators.js:101:27)
+    at CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:43)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:18
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processImmediate (node:internal/timers:453:9)
+    at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+    at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1225:11 {
+  cause: Error: LifecycleWatcher disposed
+      at LifecycleWatcher.dispose (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:170:29)
+      at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:165:25)
+      at async CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:7
+      at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1225:11
+      at async Promise.all (index 0)
+      at async runScheduledScrape (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1218:7)
+}
+[SCHEDULED] Scraping failed: Navigating frame was detached
+[SCHEDULED] Failed daily scrape for OTC->WILMETTE: Error: Navigating frame was detached
+    at <instance_members_initializer> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:33:14)
+    at new LifecycleWatcher (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:37:16)
+    at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:145:29)
+    at CdpFrame.<anonymous> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/util/decorators.js:101:27)
+    at CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:43)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:18
+    at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+    ... 2 lines matching cause stack trace ...
+    at async runScheduledScrape (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1218:7) {
+  cause: Error: LifecycleWatcher disposed
+      at LifecycleWatcher.dispose (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:170:29)
+      at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:165:25)
+      at async CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:7
+      at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1225:11
+      at async Promise.all (index 2)
+      at async runScheduledScrape (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1218:7)
+}
+[SCHEDULED] Scraping failed: Navigating frame was detached
+[SCHEDULED] Failed daily scrape for WILMETTE->OTC: Error: Navigating frame was detached
+    at <instance_members_initializer> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:33:14)
+    at new LifecycleWatcher (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:37:16)
+    at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:145:29)
+    at CdpFrame.<anonymous> (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/util/decorators.js:101:27)
+    at CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:43)
+    at file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:18
+    at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+    ... 2 lines matching cause stack trace ...
+    at async runScheduledScrape (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1218:7) {
+  cause: Error: LifecycleWatcher disposed
+      at LifecycleWatcher.dispose (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/LifecycleWatcher.js:170:29)
+      at CdpFrame.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/cdp/Frame.js:165:25)
+      at async CdpPage.goto (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/node_modules/.pnpm/puppeteer-core@24.33.0/node_modules/puppeteer-core/lib/esm/puppeteer/api/Page.js:568:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1045:7
+      at async scrapeAndCacheCrowding (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1154:20)
+      at async file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1225:11
+      at async Promise.all (index 1)
+      at async runScheduledScrape (file:///Users/davidoh/2025/depaul/CREDICO/metra-schedule-tracker/dist/index.js:1218:7)
+}
+[SCHEDULED] Starting scraping for WESTMONT->CUS (Line: BNSF)...
+[SCHEDULED] Starting scraping for WESTMONT->CUS (Line: BNSF)...
+[SCHEDULED] Starting scraping for CUS->WESTMONT (Line: BNSF)...
+[SCHEDULED] Starting scraping for CUS->WESTMONT (Line: BNSF)...
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Using overridden schedule date: 12/20/2025, 4:00:00 AM (1766224800)
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=BNSF&orig=WESTMONT&dest=CUS&time=1766224800&allstops=0&redirect=1766131055
+[SCHEDULED] Constructed URL: https://www.metra.com/schedules?line=BNSF&orig=CUS&dest=WESTMONT&time=1766224800&allstops=0&redirect=1766131055
+[SCHEDULED] Saved/Updated 18 entries for WESTMONT->CUS
+[SCHEDULED] Saved/Updated 18 entries for CUS->WESTMONT
+[SCHEDULED] Completed scraping for WESTMONT->CUS
+[SCHEDULED] Completed scraping for CUS->WESTMONT
+⏰ [SCHEDULE] Daily seed completed!
+Real-time data updated successfully

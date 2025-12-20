@@ -225,15 +225,27 @@ async function scrapeAndCacheCrowding(
       }
       
       let scheduleDate: number;
+      const now = new Date();
+      const nowChicago = now.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true });
 
       if (dateOverride) {
         // Scheduled seed: Start at specific time (e.g., 4:00 AM) to capture full day
         scheduleDate = Math.floor(dateOverride.getTime() / 1000);
-        console.log(`[${source}] Using overridden schedule date: ${dateOverride.toLocaleString()} (${scheduleDate})`);
+        const overrideChicago = dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true });
+        console.log(`\n⏰ [${source}] SCHEDULE DATE OVERRIDE:`);
+        console.log(`   Current time (Chicago): ${nowChicago}`);
+        console.log(`   Using override date: ${overrideChicago}`);
+        console.log(`   Unix timestamp: ${scheduleDate}`);
+        console.log(`   This will fetch ALL trains for the full day starting at override time\n`);
       } else {
-        // Normal request: "Now - 1 Hour" logic
-        const now = new Date();
-        scheduleDate = Math.floor(now.getTime() / 1000) - 3600;
+        // Normal request: Use current time (Metra shows trains from "now" onwards)
+        // Previously used "now - 1 hour" which could miss currently departing trains
+        scheduleDate = Math.floor(now.getTime() / 1000);
+        console.log(`\n🕐 [${source}] SCHEDULE DATE (NORMAL REQUEST):`);
+        console.log(`   Current time (Chicago): ${nowChicago}`);
+        console.log(`   Unix timestamp: ${scheduleDate}`);
+        console.log(`   ✅ Using CURRENT TIME (trains from now onwards)`);
+        console.log(`   📝 Note: Previously used 'now - 1 hour' which could miss trains\n`);
       }
       
       const { getMetraScheduleUrl } = await import("@shared/metra-urls");
@@ -541,24 +553,62 @@ function scheduleDailyScrapes() {
       await Promise.all(chunk.map(async (task) => {
         const { origin, destination, line } = task;
         
+        console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`🗓️  [SCHEDULED SCRAPE] ${origin} → ${destination} (${line})`);
+        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        
         // Use tomorrow's date at 4:00 AM (Chicago time) to ensure we get the full day's schedule
-        // 4 AM is a safe start time
+        // 4 AM is a safe start time for morning trains
         
-        // Use the difference between UTC and Chicago time to calculate "Chicago 4 AM" as a UTC Date object
+        // SIMPLIFIED APPROACH: Create tomorrow's date in Chicago time directly
+        // Instead of complex UTC offset calculations, we'll use toLocaleString to get Chicago date components
         const nowUtc = new Date();
-        const chiTimeStr = nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago' });
-        const chiTime = new Date(chiTimeStr);
-        const diff = nowUtc.getTime() - chiTime.getTime(); // Offset in ms
+        const tomorrowChicago = new Date(nowUtc.getTime() + 24 * 60 * 60 * 1000); // Tomorrow
         
-        // Construct "Local 4 AM" date (which is 4 AM UTC on server)
-        const local4am = new Date();
-        local4am.setDate(local4am.getDate() + 1);
-        local4am.setHours(4, 0, 0, 0);
+        console.log(`📅 TIMEZONE CALCULATION:`);
+        console.log(`   Server timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+        console.log(`   Server UTC time: ${nowUtc.toISOString()}`);
+        console.log(`   Current Chicago time: ${nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true })}`);
         
-        // Add the difference back to get the absolute time that corresponds to Chicago 4 AM
-        const absolute4amChicago = new Date(local4am.getTime() + diff); 
+        // Get tomorrow's date components in Chicago timezone
+        const chiYear = parseInt(tomorrowChicago.toLocaleString('en-US', { 
+          timeZone: 'America/Chicago', 
+          year: 'numeric' 
+        }));
+        const chiMonth = parseInt(tomorrowChicago.toLocaleString('en-US', { 
+          timeZone: 'America/Chicago', 
+          month: '2-digit' 
+        }));
+        const chiDay = parseInt(tomorrowChicago.toLocaleString('en-US', { 
+          timeZone: 'America/Chicago', 
+          day: '2-digit' 
+        }));
         
-        const targetDate = absolute4amChicago;
+        console.log(`   Tomorrow in Chicago: ${chiYear}-${String(chiMonth).padStart(2, '0')}-${String(chiDay).padStart(2, '0')}`);
+        
+        // Create a Date object representing 4:00 AM in Chicago timezone
+        // We construct the ISO string manually to avoid timezone confusion
+        const chicagoDateStr = `${chiYear}-${String(chiMonth).padStart(2, '0')}-${String(chiDay).padStart(2, '0')}`;
+        
+        // Parse this date at 4 AM Chicago time
+        // Note: We'll use UTC constructor then adjust for Chicago offset
+        // Chicago is UTC-6 (CST) or UTC-5 (CDT depending on DST)
+        const targetDate = new Date(`${chicagoDateStr}T04:00:00-06:00`); // Assuming CST (most common)
+        
+        console.log(`🎯 TARGET SCRAPE DATE:`);
+        console.log(`   Chicago time: ${targetDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true })}`);
+        console.log(`   ISO 8601: ${targetDate.toISOString()}`);
+        console.log(`   Unix timestamp: ${Math.floor(targetDate.getTime() / 1000)}`);
+        
+        // Verify it's actually tomorrow
+        const hoursDiff = (targetDate.getTime() - nowUtc.getTime()) / (1000 * 60 * 60);
+        console.log(`\n✅ VERIFICATION:`);
+        console.log(`   Hours from now: ${hoursDiff.toFixed(1)} hours`);
+        console.log(`   Expected: ~${24 + 4 - parseInt(nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }))} hours (tomorrow at 4 AM)`);
+        if (hoursDiff < 0 || hoursDiff > 30) {
+          console.log(`   ⚠️  WARNING: Target date seems wrong! Should be 0-30 hours from now.`);
+        }
+        console.log(``);
         
         console.log(`[SCHEDULED] Starting scraping for ${origin}->${destination} (Line: ${line})...`);
         
@@ -656,7 +706,7 @@ async function startServer() {
         try {
           const dbModule = await import("./db/schema.js");
           const scheduleModule = await import("./db/schedule-api.js");
-          const realtimeModule = await import("./db/realtime-updater.js");
+          const realtimeModule = await import("./db/realtime-updater.js"); // Still import for getAllDelays
           const weatherModule = await import("./db/weather-updater.js");
           const loaderModule = await import("./db/gtfs-loader.js");
           
@@ -665,8 +715,7 @@ async function startServer() {
           getAllSchedules = scheduleModule.getAllSchedules;
           getNextTrain = scheduleModule.getNextTrain;
           shouldUpdateGTFS = scheduleModule.shouldUpdateGTFS;
-          getAllDelays = realtimeModule.getAllDelays;
-          updateRealtimeData = realtimeModule.updateRealtimeData;
+          getAllDelays = realtimeModule.getAllDelays; // Only getAllDelays from realtimeModule
           updateWeatherData = weatherModule.updateWeatherData;
           getAllWeather = weatherModule.getAllWeather;
           loadGTFSIntoDatabase = loaderModule.loadGTFSIntoDatabase;

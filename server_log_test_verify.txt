@@ -75,3 +75,19 @@ Real-time data updated successfully
 [POSITIONS] Bulk cached 4 trains across all lines
 [POSITIONS] Bulk cached 4 trains across all lines
 [POSITIONS] Bulk cached 4 trains across all lines
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[API] [1766130443708-ots0c9rgr] Crowding request: PALATINE->OTC (force=undefined)
+[API] [1766130443708-ots0c9rgr] Railway env check - NODE_ENV: production, PORT: undefined
+[DB] Schema check passed: 'predicted_departure' column exists.
+[CACHE HIT] Returning cached crowding data for PALATINE->OTC (51 trains, -330 min old)
+[API] [1766130443708-ots0c9rgr] Request completed in 1ms
+Real-time data updated successfully
+Real-time data updated successfully
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines
+[POSITIONS] Bulk cached 4 trains across all lines

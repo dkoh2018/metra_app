@@ -60,6 +60,12 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
       new Uint8Array(response.data)
     );
     
+    // Handle empty feed gracefully (e.g., during off-hours when no trains are running)
+    if (!feed.entity || feed.entity.length === 0) {
+      console.log('⏸️  No train data available (likely off-hours - no trains running)');
+      return;
+    }
+    
     // Use INSERT OR IGNORE to avoid conflicts with UNIQUE constraint
     // We want to keep historical updates, so we insert new rows rather than replacing
     // The getAllDelays() function will deduplicate by selecting the latest update
@@ -173,7 +179,11 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
     console.log('Real-time data updated successfully');
     
   } catch (error: any) {
-    console.error('Error updating real-time data:', error.message);
+    console.error('\n❌ [REALTIME] Error updating real-time data:', error.message);
+    if (error.response) {
+      console.error(`   HTTP Status: ${error.response.status}`);
+      console.error(`   Response size: ${error.response.data?.byteLength || 0} bytes`);
+    }
     throw error;
   }
   // Don't close the database connection - let it be reused
