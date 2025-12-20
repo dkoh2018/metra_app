@@ -1247,7 +1247,8 @@ async function startServer() {
           
           if (cachedData.length > 0) {
             const result = formatCachedData(cachedData);
-            const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at).getTime()) / 1000 / 60);
+            // Append 'Z' to treat database timestamp (UTC) as UTC
+            const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at + 'Z').getTime()) / 1000 / 60);
             console.log(`✅ [CROWDING API] Cache HIT - Returning ${result.crowding.length} trains (${cacheAge} min old)`);
             console.log(`   First 3 trains: ${result.crowding.slice(0, 3).map((t: any) => `${t.trip_id}:${t.crowding}`).join(', ')}`);
             return clearTimeoutAndSend(result);
