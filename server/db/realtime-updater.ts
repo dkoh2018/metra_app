@@ -12,7 +12,8 @@ const METRA_API_URL = 'https://gtfspublic.metrarr.com/gtfs/public';
  */
 function getMonitoredStops(): string[] {
   // Highlighted stations (stations with isHighlight: true)
-  const highlightedStations = ['PALATINE', 'SCHAUM'];
+  // IMPORTANT: Keep this in sync with STATIONS in client/src/lib/stations.ts
+  const highlightedStations = ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT'];
   
   // Terminals for each line
   const terminals = ['OTC', 'CUS'];
@@ -116,7 +117,7 @@ export async function updateRealtimeData(apiToken: string): Promise<void> {
           const monitoredStops = getMonitoredStops();
           for (const stopTimeUpdate of entity.tripUpdate.stopTimeUpdate || []) {
             const stopId = stopTimeUpdate.stopId;
-            if (!monitoredStops.includes(stopId)) continue;
+            if (!stopId || !monitoredStops.includes(stopId)) continue;
             
             const scheduledArrival = stopTimeUpdate.scheduleRelationship === 1 // SCHEDULED
               ? stopTimeUpdate.arrival?.time?.toString()

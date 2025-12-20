@@ -149,7 +149,12 @@ export default function Schedule() {
     upcomingTrains.sort((a, b) => a.minutesUntil - b.minutesUntil);
     
     // Find first train with valid (non-Infinity) minutes until
-    const next = upcomingTrains.find(t => t.minutesUntil !== Infinity && t.minutesUntil > 0);
+    // Exclude SENTINEL_END which is a placeholder, not a real train
+    const next = upcomingTrains.find(t => 
+      t.train.id !== 'SENTINEL_END' && 
+      t.minutesUntil !== Infinity && 
+      t.minutesUntil > 0
+    );
     
     return next?.train || trains[0] || null;
   }, [dayType, direction, scheduleData, estimatedTimes, currentMinutes]);
