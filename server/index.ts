@@ -697,10 +697,13 @@ async function startServer() {
              console.log("🧪 [TESTING] Triggering 4-minute scrape...");
              const testRoutes = [
                { origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' },
+               { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' },
                { origin: 'WESTMONT', destination: 'CUS', line: 'BNSF' },
+               { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' },
                { origin: 'SCHAUM', destination: 'CUS', line: 'MD-W' },
-               // Add outbound for checking too
-               { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' }
+               { origin: 'CUS', destination: 'SCHAUM', line: 'MD-W' },
+               { origin: 'WILMETTE', destination: 'OTC', line: 'UP-N' },
+               { origin: 'OTC', destination: 'WILMETTE', line: 'UP-N' }
              ];
              
              for (const route of testRoutes) {
