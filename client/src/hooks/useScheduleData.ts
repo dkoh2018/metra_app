@@ -446,6 +446,10 @@ export function useScheduleData(
           data.forEach(item => {
              const tripIdMatch = item.trip_id?.match(TRIP_ID_REGEX);
              const trainId = tripIdMatch ? tripIdMatch[1] : null;
+
+             if (!trainId) {
+                console.warn(`⚠️ [CROWDING MAPPING] Could not parse train number from trip_id: ${item.trip_id}`);
+             }
              
              if (item.crowding) {
                 newCrowdingMap.set(item.trip_id, item.crowding.toLowerCase() as CrowdingLevel);
