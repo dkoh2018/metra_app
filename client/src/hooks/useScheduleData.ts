@@ -443,13 +443,32 @@ export function useScheduleData(
           const newCrowdingMap = new Map<string, CrowdingLevel>();
           const newEstimatedTimes = new Map<string, any>();
           
-          data.forEach(item => {
-             const tripIdMatch = item.trip_id?.match(TRIP_ID_REGEX);
-             const trainId = tripIdMatch ? tripIdMatch[1] : null;
+             data.forEach(item => {
+                // Use the enhanced transformation logic we built for schedule-helpers (regex + fallback)
+                // We'll mimic it locally here or import it?
+                // For now, let's use the regex import but apply the same FALLBACK logic as transformTrain
+                
+                let trainId: string | null = null;
+                const tripIdMatch = item.trip_id?.match(TRIP_ID_REGEX);
+                if (tripIdMatch && tripIdMatch[1]) {
+                  trainId = tripIdMatch[1];
+                } else {
+                   // Frontend fallback for tricky IDs (like BNSF_BN1200)
+                   const parts = item.trip_id.split('_');
+                   const numberPart = parts.find((p: string) => /\d+/.test(p) && (p.toUpperCase().includes('UNW') || p.toUpperCase().includes('MW') || p.toUpperCase().includes('UN') || p.toUpperCase().includes('BN')));
+                   if (numberPart) {
+                     trainId = numberPart.toUpperCase().replace('UNW', '').replace('MW', '').replace('UN', '').replace('BN', '');
+                   }
+                }
 
-             if (!trainId) {
-                console.warn(`⚠️ [CROWDING MAPPING] Could not parse train number from trip_id: ${item.trip_id}`);
-             }
+                if (!trainId) {
+                   console.warn(`⚠️ [CROWDING MAPPING] FAILURE: Could not parse train number from trip_id: ${item.trip_id}`);
+                } else {
+                   // Debug success for BNSF/MD-W
+                   if (item.trip_id.includes('BN') || item.trip_id.includes('MW')) {
+                      console.log(`✅ [CROWDING MAPPING] Mapped ${item.trip_id} -> ${trainId}`);
+                   }
+                }
              
              if (item.crowding) {
                 newCrowdingMap.set(item.trip_id, item.crowding.toLowerCase() as CrowdingLevel);
