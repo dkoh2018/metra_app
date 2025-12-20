@@ -104,8 +104,14 @@ export function NextTrainCard({
     return minutesUntil >= 0 && minutesUntil < 24 * 60 ? minutesUntil : null;
   };
 
+  // Determine if this is a Sentinel (End of Service) train
+  const isSentinel = nextTrain.id === 'SENTINEL_END';
+  const sentinelNextDayDep = isSentinel ? (nextTrain as any)._nextDayDeparture : null;
+  const sentinelNextDayArr = isSentinel ? (nextTrain as any)._nextDayArrival : null;
+
   // Format time for display - handles GTFS overnight times
   const formatTime = useCallback((timeStr: string) => {
+    if (!timeStr) return '--:--';
     let [hours, minutes] = timeStr.split(':').map(Number);
     
     hours = hours % 24;
@@ -116,6 +122,11 @@ export function NextTrainCard({
   }, []);
   
   const departureTimeForCountdown = (() => {
+    // Priority 0: SENTINEL override
+    if (isSentinel && sentinelNextDayDep) {
+      return sentinelNextDayDep;
+    }
+
     // Priority 1: Use scraped estimated departure time
     if (scrapedEstimate?.predicted_departure) {
       const match = scrapedEstimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
@@ -161,64 +172,6 @@ export function NextTrainCard({
     ? formatPredictedTimeForCard(predictedArrivalData.scheduled)
     : null;
   
-  // CHECK FOR SENTINEL (End of Service)
-  if (nextTrain.id === 'SENTINEL_END') {
-    const nextDayDep = (nextTrain as any)._nextDayDeparture;
-    const nextDayArr = (nextTrain as any)._nextDayArrival;
-    
-    return (
-      <div className={cn(
-        "rounded-xl border shadow-sm mb-6 overflow-hidden bg-white border-zinc-200",
-        direction === 'outbound' ? "border-l-4 border-l-amber-500" : "border-l-4 border-l-blue-500"
-      )}>
-        {/* Header */}
-        <div className={cn(
-          "flex items-center justify-between px-4 py-2 border-b border-zinc-200",
-          direction === 'outbound' ? "bg-amber-50/50" : "bg-blue-50/50"
-        )}>
-          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-600">
-             <span className={direction === 'outbound' ? "text-amber-700 font-bold" : "text-blue-700 font-bold"}>
-              {direction === 'inbound' ? 'Inbound' : 'Outbound'}
-            </span>
-            <ArrowRight className="w-3 h-3" />
-            <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">
-              {direction === 'inbound' ? 'Chicago' : selectedStation.name}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-             <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase bg-zinc-100 text-zinc-500">
-               Service Ended
-             </span>
-          </div>
-        </div>
-        
-        {/* Content */}
-        <div className="px-3 py-4 sm:px-4 sm:py-5 flex flex-col items-center justify-center text-center">
-           <div className="text-zinc-400 mb-2">
-             <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-             <p className="text-sm font-medium uppercase tracking-wide">No more trains tonight</p>
-           </div>
-           
-           {nextDayDep ? (
-             <div className="mt-2">
-               <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">First train tomorrow</p>
-               <div className="text-3xl font-bold text-zinc-800">
-                 {formatTime(nextDayDep)}
-               </div>
-               {nextDayArr && (
-                 <p className="text-sm text-zinc-500 mt-1">
-                   Arrives {formatTime(nextDayArr)} · {calculateDuration(nextDayDep, nextDayArr)}m trip
-                 </p>
-               )}
-             </div>
-           ) : (
-             <p className="text-zinc-500 mt-2">Check back tomorrow morning for schedule.</p>
-           )}
-        </div>
-      </div>
-    );
-  }
-
   const crowdingLevel = tripId 
     ? (crowdingData.get(tripId) || crowdingData.get(nextTrain.id))
     : crowdingData.get(nextTrain.id);
@@ -242,7 +195,7 @@ export function NextTrainCard({
         </div>
         <div className="flex items-center gap-1.5">
 
-          {crowdingLevel && (
+          {!isSentinel && crowdingLevel && (
             <span className={cn(
               "px-2 py-0.5 rounded text-xs font-semibold uppercase",
               CROWDING_BADGE_STYLES[crowdingLevel],
@@ -250,13 +203,13 @@ export function NextTrainCard({
               {crowdingLevel === 'moderate' ? 'Mod' : CROWDING_LABELS[crowdingLevel]}
             </span>
           )}
-          {nextTrain.isExpress && (
+          {nextTrain.isExpress && !isSentinel && (
             <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-primary/10 text-primary">
               Express
             </span>
           )}
           <span className="text-xs font-mono text-zinc-500">
-            #{nextTrain.id}
+            {isSentinel ? 'Service Ended' : `#${nextTrain.id}`}
           </span>
         </div>
       </div>
@@ -265,16 +218,19 @@ export function NextTrainCard({
       <div className="px-3 py-2.5 sm:px-4 sm:py-3">
         {/* Time Row - Primary Info - Always single row */}
         <div className="flex flex-row items-center justify-between gap-2 mb-2">
-          {/* Left: Departure Time */}
-          {/* Left: Departure Time */}
+          {/* Left: Departure Time (or "Service Ended" title if sentinel?) No, keep time. */}
           <div className="flex items-center gap-2">
             <div className={cn(
               "text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums tracking-tight text-zinc-900",
-              delayMinutes && delayMinutes > 0 ? "text-red-600" : "",
-              scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure > (scrapedEstimate.scheduled_departure || "") ? "text-rose-600 font-semibold" : "",
-              scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure < (scrapedEstimate.scheduled_departure || "") ? "text-emerald-600 font-semibold" : ""
+              delayMinutes && delayMinutes > 0 && !isSentinel ? "text-red-600" : "",
+              !isSentinel && scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure > (scrapedEstimate.scheduled_departure || "") ? "text-rose-600 font-semibold" : "",
+              !isSentinel && scrapedEstimate?.predicted_departure && scrapedEstimate.predicted_departure < (scrapedEstimate.scheduled_departure || "") ? "text-emerald-600 font-semibold" : ""
             )}>
               {(() => {
+                if (isSentinel) {
+                   return sentinelNextDayDep ? formatTime(sentinelNextDayDep) : "--:--";
+                }
+
                 // Priority 1: Use scraped estimated departure if available
                 if (scrapedEstimate?.predicted_departure) {
                   const sched = scrapedEstimate.scheduled_departure || formatTime(nextTrain.departureTime);
@@ -313,48 +269,58 @@ export function NextTrainCard({
             </div>
             <div className={cn(
               "flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 text-[8px] sm:text-[10px] font-bold uppercase tracking-wider rounded-full border shadow-sm self-center",
-              direction === 'outbound' 
-                ? "bg-amber-50 text-amber-700 border-amber-200" 
-                : "bg-blue-50 text-blue-700 border-blue-200"
+              isSentinel 
+                ? "bg-zinc-100 text-zinc-600 border-zinc-200"
+                : direction === 'outbound' 
+                  ? "bg-amber-50 text-amber-700 border-amber-200" 
+                  : "bg-blue-50 text-blue-700 border-blue-200"
             )}>
-              <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
-                <span className={cn(
-                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                  direction === 'outbound' ? "bg-amber-500" : "bg-blue-500"
-                )}></span>
-                <span className={cn(
-                  "relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2",
-                  direction === 'outbound' ? "bg-amber-500" : "bg-blue-500"
-                )}></span>
-              </span>
-              <span className="hidden sm:inline">Next Train</span>
-              <span className="sm:hidden">Next</span>
+              {!isSentinel && (
+                <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
+                  <span className={cn(
+                    "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                    direction === 'outbound' ? "bg-amber-500" : "bg-blue-500"
+                  )}></span>
+                  <span className={cn(
+                    "relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2",
+                    direction === 'outbound' ? "bg-amber-500" : "bg-blue-500"
+                  )}></span>
+                </span>
+              )}
+              <span className="hidden sm:inline">{isSentinel ? "First Train Tomorrow" : "Next Train"}</span>
+              <span className="sm:hidden">{isSentinel ? "Tomorrow" : "Next"}</span>
             </div>
           </div>
           
           {/* Right: Countdown */}
-          {minutesUntil !== null && (
+          {(minutesUntil !== null || isSentinel) && (
             <div className="text-right flex-shrink-0">
               <div className={cn(
                 "text-xl sm:text-2xl md:text-3xl font-bold tabular-nums",
-                direction === 'outbound' ? "text-amber-600" : "text-primary"
+                isSentinel ? "text-zinc-400" : (direction === 'outbound' ? "text-amber-600" : "text-primary")
               )}>
                 {(() => {
-                   if (minutesUntil < 60) {
-                     return <>{minutesUntil}<span className="text-sm sm:text-lg ml-0.5">m</span></>;
+                   if (isSentinel) {
+                     return <span className="text-base sm:text-xl">--</span>;
                    }
-                   const h = Math.floor(minutesUntil / 60);
-                   const m = minutesUntil % 60;
-                   return (
-                     <>
-                       {h}<span className="text-sm sm:text-lg ml-0.5 mr-1">h</span>
-                       {m}<span className="text-sm sm:text-lg ml-0.5">m</span>
-                     </>
-                   );
+                   if (minutesUntil !== null) {
+                     if (minutesUntil < 60) {
+                       return <>{minutesUntil}<span className="text-sm sm:text-lg ml-0.5">m</span></>;
+                     }
+                     const h = Math.floor(minutesUntil / 60);
+                     const m = minutesUntil % 60;
+                     return (
+                       <>
+                         {h}<span className="text-sm sm:text-lg ml-0.5 mr-1">h</span>
+                         {m}<span className="text-sm sm:text-lg ml-0.5">m</span>
+                       </>
+                     );
+                   }
+                   return null;
                 })()}
               </div>
               <div className="text-[8px] sm:text-[10px] uppercase tracking-wide text-zinc-500">
-                until departure
+                {isSentinel ? "Service Ended" : "until departure"}
               </div>
             </div>
           )}
@@ -365,8 +331,12 @@ export function NextTrainCard({
           {/* Left side: Arrives + Duration + Weather */}
           <div className="flex items-center gap-1 sm:gap-3 flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex items-center gap-1 shrink-0">
-              <span className="shrink-0">Arrives</span>
+              <span className="shrink-0">{isSentinel ? "Tomorrow" : "Arrives"}</span>
               {(() => {
+                if (isSentinel) {
+                   return <span className="font-semibold shrink-0">{sentinelNextDayArr ? formatTime(sentinelNextDayArr) : "--:--"}</span>;
+                }
+
                 // Check scraped estimated arrival first
                 if (scrapedEstimate?.predicted_arrival && scrapedEstimate?.scheduled_arrival) {
                   const sched = scrapedEstimate.scheduled_arrival;
@@ -403,8 +373,12 @@ export function NextTrainCard({
             <span className="text-zinc-300 shrink-0">·</span>
             <span className="shrink-0">
               {(() => {
+                if (isSentinel && sentinelNextDayDep && sentinelNextDayArr) {
+                    return `${calculateDuration(sentinelNextDayDep, sentinelNextDayArr)}m trip`;
+                }
+
                 // Calculate duration from estimated times if available
-                if (scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
+                if (!isSentinel && scrapedEstimate?.predicted_departure && scrapedEstimate?.predicted_arrival) {
                   const depMins = parseTimeToMinutes(scrapedEstimate.predicted_departure);
                   const arrMins = parseTimeToMinutes(scrapedEstimate.predicted_arrival);
                   let estimatedDuration = arrMins - depMins;
