@@ -231,8 +231,19 @@ async function scrapeAndCacheCrowding(
         console.log(`[${source}] Using schedule override: ${dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago' })}`);
       } else {
         const now = new Date();
-        scheduleDate = Math.floor(now.getTime() / 1000);
-        console.log(`[${source}] Using current time for schedule`);
+        const chicagoHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }));
+        
+        // AUTO-CORRECT: If request is between Midnight and 4 AM, force scrape for 4:00 AM Today
+        // This ensures we get the FULL DAY schedule instead of "late night" empty data
+        if (chicagoHour >= 0 && chicagoHour < 4) {
+             const today4am = new Date(now);
+             today4am.setHours(4, 0, 0, 0); // 4:00 AM local time (approx, good enough for timestamp)
+             scheduleDate = Math.floor(today4am.getTime() / 1000);
+             console.log(`[${source}] 🌙 Early morning detected (${chicagoHour} AM). Forcing schedule time to 4:00 AM to get full day data.`);
+        } else {
+             scheduleDate = Math.floor(now.getTime() / 1000);
+             console.log(`[${source}] Using current time for schedule`);
+        }
       }
       
       const { getMetraScheduleUrl } = await import("@shared/metra-urls");
