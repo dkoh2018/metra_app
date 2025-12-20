@@ -149,18 +149,68 @@ export function useScheduleData(
         if (data) {
           const newTripIdMap = new Map<string, string>();
           
+          // Helper to get next day type
+          const getNextServiceDay = (current: DayType): DayType => {
+            if (current === 'weekday') return 'saturday';
+            if (current === 'saturday') return 'sunday';
+            return 'weekday';
+          };
+          
+          // Helper to append Sentinel Train
+          const appendSentinel = (trains: Train[], nextDayTrains: Train[] | undefined): Train[] => {
+            const nextFirstTrain = nextDayTrains && nextDayTrains.length > 0 ? nextDayTrains[0] : null;
+            
+            // Create Sentinel
+            const sentinel: Train = {
+              id: 'SENTINEL_END',
+              // Use "27:00" (3 AM) as base, but display will use nextFirstTrain info
+              departureTime: '27:00', 
+              arrivalTime: '28:00',
+              isExpress: false,
+              // Store next day info in custom properties (we'll need to extend generic Train type or just use standard props)
+              // Actually, let's just use standard props but we know it's SENTINEL via ID.
+              // We will hijack the departureTime to store the "Next First Train Departure" for display?
+              // No, better to keep 27:00 so it sorts to the end.
+              // We'll attach the REAL next times as hidden props or assume UI finds them?
+              // Let's just use the PROPER times of the next train, but add +24h to them relative to NOW?
+              // Or simpler: Just store the string.
+              _nextDayDeparture: nextFirstTrain?.departureTime,
+              _nextDayArrival: nextFirstTrain?.arrivalTime
+            } as Train & { _nextDayDeparture?: string, _nextDayArrival?: string };
+            
+            return [...trains, sentinel];
+          };
+
           const transformed: ScheduleDataState = {
             weekday: {
-              inbound: (data.weekday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.weekday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              inbound: appendSentinel(
+                (data.weekday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.saturday?.inbound || []).map(train => transformTrain(train, newTripIdMap)) // Approx next day
+              ),
+              outbound: appendSentinel(
+                (data.weekday?.outbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.saturday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              )
             },
             saturday: {
-              inbound: (data.saturday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.saturday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              inbound: appendSentinel(
+                (data.saturday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.sunday?.inbound || []).map(train => transformTrain(train, newTripIdMap))
+              ),
+              outbound: appendSentinel(
+                (data.saturday?.outbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.sunday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              )
             },
             sunday: {
-              inbound: (data.sunday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
-              outbound: (data.sunday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              inbound: appendSentinel(
+                (data.sunday?.inbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.weekday?.inbound || []).map(train => transformTrain(train, newTripIdMap))
+              ),
+              outbound: appendSentinel(
+                (data.sunday?.outbound || []).map(train => transformTrain(train, newTripIdMap)),
+                (data.weekday?.outbound || []).map(train => transformTrain(train, newTripIdMap))
+              )
             }
           };
           setScheduleData(transformed);

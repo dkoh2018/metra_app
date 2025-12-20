@@ -199,7 +199,7 @@ export const ScheduleTable = memo(function ScheduleTable({
         ref={scrollContainerRef}
         className="divide-y divide-zinc-100 h-[280px] overflow-y-auto overflow-x-auto [scrollbar-width:thin] [scrollbar-color:transparent_transparent] hover:[scrollbar-color:rgb(212_212_212)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent"
       >
-        {trains.map((train, index) => {
+        {trains.filter(t => t.id !== 'SENTINEL_END').map((train, index) => {
           const isNext = train.id === nextTrainId;
 
           const tripId = tripIdMap.get(train.id);

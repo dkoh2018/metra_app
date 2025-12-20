@@ -161,6 +161,64 @@ export function NextTrainCard({
     ? formatPredictedTimeForCard(predictedArrivalData.scheduled)
     : null;
   
+  // CHECK FOR SENTINEL (End of Service)
+  if (nextTrain.id === 'SENTINEL_END') {
+    const nextDayDep = (nextTrain as any)._nextDayDeparture;
+    const nextDayArr = (nextTrain as any)._nextDayArrival;
+    
+    return (
+      <div className={cn(
+        "rounded-xl border shadow-sm mb-6 overflow-hidden bg-white border-zinc-200",
+        direction === 'outbound' ? "border-l-4 border-l-amber-500" : "border-l-4 border-l-blue-500"
+      )}>
+        {/* Header */}
+        <div className={cn(
+          "flex items-center justify-between px-4 py-2 border-b border-zinc-200",
+          direction === 'outbound' ? "bg-amber-50/50" : "bg-blue-50/50"
+        )}>
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-600">
+             <span className={direction === 'outbound' ? "text-amber-700 font-bold" : "text-blue-700 font-bold"}>
+              {direction === 'inbound' ? 'Inbound' : 'Outbound'}
+            </span>
+            <ArrowRight className="w-3 h-3" />
+            <span className="text-base sm:text-lg font-bold text-zinc-500 uppercase tracking-[0.15em]">
+              {direction === 'inbound' ? 'Chicago' : selectedStation.name}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+             <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase bg-zinc-100 text-zinc-500">
+               Service Ended
+             </span>
+          </div>
+        </div>
+        
+        {/* Content */}
+        <div className="px-3 py-4 sm:px-4 sm:py-5 flex flex-col items-center justify-center text-center">
+           <div className="text-zinc-400 mb-2">
+             <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+             <p className="text-sm font-medium uppercase tracking-wide">No more trains tonight</p>
+           </div>
+           
+           {nextDayDep ? (
+             <div className="mt-2">
+               <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">First train tomorrow</p>
+               <div className="text-3xl font-bold text-zinc-800">
+                 {formatTime(nextDayDep)}
+               </div>
+               {nextDayArr && (
+                 <p className="text-sm text-zinc-500 mt-1">
+                   Arrives {formatTime(nextDayArr)} · {calculateDuration(nextDayDep, nextDayArr)}m trip
+                 </p>
+               )}
+             </div>
+           ) : (
+             <p className="text-zinc-500 mt-2">Check back tomorrow morning for schedule.</p>
+           )}
+        </div>
+      </div>
+    );
+  }
+
   const crowdingLevel = tripId 
     ? (crowdingData.get(tripId) || crowdingData.get(nextTrain.id))
     : crowdingData.get(nextTrain.id);
