@@ -358,6 +358,8 @@ export function useScheduleData(
       
       if (forceRefresh) params.append('force', 'true');
       
+      console.log(`🔄 [CROWDING FETCH] Request:`, { origin, dest, line: selectedStation.line, force: forceRefresh });
+      
       fetch(`/api/crowding?${params.toString()}`)
         .then(res => {
            if (!res.ok) {
@@ -367,11 +369,16 @@ export function useScheduleData(
            return res.json();
         })
         .then((response: any) => {
+          console.log(`✅ [CROWDING FETCH] Response received:`, { 
+            dataLength: response.crowding?.length || 0, 
+            firstItems: response.crowding?.slice(0, 3) 
+          });
+          
           if (response.error) throw new Error(response.error);
           
           const data = response.crowding;
           if (!Array.isArray(data)) {
-             console.warn("Invalid crowding list received:", response);
+             console.warn("⚠️ [CROWDING FETCH] Invalid crowding list received:", response);
              return; 
           }
           
@@ -399,9 +406,16 @@ export function useScheduleData(
              }
           });
           
+          console.log(`💾 [CROWDING FETCH] Processing ${data.length} items...`);
+          
           setCrowdingData(prev => {
              const next = new Map(prev);
              newCrowdingMap.forEach((v, k) => next.set(k, v));
+             
+             console.log(`📋 [CROWDING FETCH] Updated crowding map:`, {
+               totalEntries: next.size,
+               sample: Array.from(next.entries()).slice(0, 5)
+             });
              
              // Save to localStorage
              try {

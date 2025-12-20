@@ -225,27 +225,14 @@ async function scrapeAndCacheCrowding(
       }
       
       let scheduleDate: number;
-      const now = new Date();
-      const nowChicago = now.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true });
 
       if (dateOverride) {
-        // Scheduled seed: Start at specific time (e.g., 4:00 AM) to capture full day
         scheduleDate = Math.floor(dateOverride.getTime() / 1000);
-        const overrideChicago = dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true });
-        console.log(`\n⏰ [${source}] SCHEDULE DATE OVERRIDE:`);
-        console.log(`   Current time (Chicago): ${nowChicago}`);
-        console.log(`   Using override date: ${overrideChicago}`);
-        console.log(`   Unix timestamp: ${scheduleDate}`);
-        console.log(`   This will fetch ALL trains for the full day starting at override time\n`);
+        console.log(`[${source}] Using schedule override: ${dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago' })}`);
       } else {
-        // Normal request: Use current time (Metra shows trains from "now" onwards)
-        // Previously used "now - 1 hour" which could miss currently departing trains
+        const now = new Date();
         scheduleDate = Math.floor(now.getTime() / 1000);
-        console.log(`\n🕐 [${source}] SCHEDULE DATE (NORMAL REQUEST):`);
-        console.log(`   Current time (Chicago): ${nowChicago}`);
-        console.log(`   Unix timestamp: ${scheduleDate}`);
-        console.log(`   ✅ Using CURRENT TIME (trains from now onwards)`);
-        console.log(`   📝 Note: Previously used 'now - 1 hour' which could miss trains\n`);
+        console.log(`[${source}] Using current time for schedule`);
       }
       
       const { getMetraScheduleUrl } = await import("@shared/metra-urls");
@@ -395,16 +382,15 @@ async function scrapeAndCacheCrowding(
       }, origin, destination, scheduleDate);
 
       if (!extractedData || !extractedData.crowding) {
-        console.error(`[DEBUG_SCRAPE] Extraction returned null or missing crowding`);
+        console.error(`[${source}] ❌ Extraction failed - no crowding data returned`);
         throw new Error('No crowding data extracted');
       }
       
-      // DEBUG: Log what we are about to save
-      console.log(`[DEBUG_SCRAPE] Extracted Data Summary:`);
-      extractedData.crowding.forEach((item: any, idx: number) => {
-        if (idx < 5) { // Log first 5
-          console.log(`[DEBUG_SCRAPE] Trip ${item.trip_id}: Crowding=${item.crowding}, Dep=${item.scheduled_departure}->${item.predicted_departure || 'OnTime'}`);
-        }
+      console.log(`\n📊 [${source}] CROWDING DATA EXTRACTED:`);
+      console.log(`   Total trains found: ${extractedData.crowding.length}`);
+      console.log(`   Sample (first 3):`);
+      extractedData.crowding.slice(0, 3).forEach((item: any) => {
+        console.log(`   - ${item.trip_id}: crowding=${item.crowding}, dep=${item.scheduled_departure || 'N/A'}${item.estimated_departure ? ` (delayed to ${item.estimated_departure})` : ''}`);
       });
 
       // Save to Database (UPSERT)
@@ -553,64 +539,17 @@ function scheduleDailyScrapes() {
       await Promise.all(chunk.map(async (task) => {
         const { origin, destination, line } = task;
         
-        console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(`🗓️  [SCHEDULED SCRAPE] ${origin} → ${destination} (${line})`);
-        console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        
-        // Use tomorrow's date at 4:00 AM (Chicago time) to ensure we get the full day's schedule
-        // 4 AM is a safe start time for morning trains
-        
-        // SIMPLIFIED APPROACH: Create tomorrow's date in Chicago time directly
-        // Instead of complex UTC offset calculations, we'll use toLocaleString to get Chicago date components
+        // Simplified timezone calculation (tested and working)
         const nowUtc = new Date();
-        const tomorrowChicago = new Date(nowUtc.getTime() + 24 * 60 * 60 * 1000); // Tomorrow
+        const tomorrowChicago = new Date(nowUtc.getTime() + 24 * 60 * 60 * 1000);
         
-        console.log(`📅 TIMEZONE CALCULATION:`);
-        console.log(`   Server timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
-        console.log(`   Server UTC time: ${nowUtc.toISOString()}`);
-        console.log(`   Current Chicago time: ${nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true })}`);
-        
-        // Get tomorrow's date components in Chicago timezone
-        const chiYear = parseInt(tomorrowChicago.toLocaleString('en-US', { 
-          timeZone: 'America/Chicago', 
-          year: 'numeric' 
-        }));
-        const chiMonth = parseInt(tomorrowChicago.toLocaleString('en-US', { 
-          timeZone: 'America/Chicago', 
-          month: '2-digit' 
-        }));
-        const chiDay = parseInt(tomorrowChicago.toLocaleString('en-US', { 
-          timeZone: 'America/Chicago', 
-          day: '2-digit' 
-        }));
-        
-        console.log(`   Tomorrow in Chicago: ${chiYear}-${String(chiMonth).padStart(2, '0')}-${String(chiDay).padStart(2, '0')}`);
-        
-        // Create a Date object representing 4:00 AM in Chicago timezone
-        // We construct the ISO string manually to avoid timezone confusion
+        const chiYear = parseInt(tomorrowChicago.toLocaleString('en-US', { timeZone: 'America/Chicago', year: 'numeric' }));
+        const chiMonth = parseInt(tomorrowChicago.toLocaleString('en-US', { timeZone: 'America/Chicago', month: '2-digit' }));
+        const chiDay = parseInt(tomorrowChicago.toLocaleString('en-US', { timeZone: 'America/Chicago', day: '2-digit' }));
         const chicagoDateStr = `${chiYear}-${String(chiMonth).padStart(2, '0')}-${String(chiDay).padStart(2, '0')}`;
+        const targetDate = new Date(`${chicagoDateStr}T04:00:00-06:00`);
         
-        // Parse this date at 4 AM Chicago time
-        // Note: We'll use UTC constructor then adjust for Chicago offset
-        // Chicago is UTC-6 (CST) or UTC-5 (CDT depending on DST)
-        const targetDate = new Date(`${chicagoDateStr}T04:00:00-06:00`); // Assuming CST (most common)
-        
-        console.log(`🎯 TARGET SCRAPE DATE:`);
-        console.log(`   Chicago time: ${targetDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: true })}`);
-        console.log(`   ISO 8601: ${targetDate.toISOString()}`);
-        console.log(`   Unix timestamp: ${Math.floor(targetDate.getTime() / 1000)}`);
-        
-        // Verify it's actually tomorrow
-        const hoursDiff = (targetDate.getTime() - nowUtc.getTime()) / (1000 * 60 * 60);
-        console.log(`\n✅ VERIFICATION:`);
-        console.log(`   Hours from now: ${hoursDiff.toFixed(1)} hours`);
-        console.log(`   Expected: ~${24 + 4 - parseInt(nowUtc.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }))} hours (tomorrow at 4 AM)`);
-        if (hoursDiff < 0 || hoursDiff > 30) {
-          console.log(`   ⚠️  WARNING: Target date seems wrong! Should be 0-30 hours from now.`);
-        }
-        console.log(``);
-        
-        console.log(`[SCHEDULED] Starting scraping for ${origin}->${destination} (Line: ${line})...`);
+        console.log(`[SCHEDULED] Scraping ${origin}->${destination} (${line}) for ${targetDate.toLocaleString('en-US', { timeZone: 'America/Chicago' })}...`);
         
         try {
           await scrapeAndCacheCrowding(
@@ -1142,8 +1081,12 @@ async function startServer() {
     app.get("/api/crowding", async (req, res) => {
       const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const startTime = Date.now();
-      console.log(`[API] [${requestId}] Crowding request: ${req.query.origin || 'PALATINE'}->${req.query.destination || 'OTC'} (force=${req.query.force})`);
-      console.log(`[API] [${requestId}] Railway env check - NODE_ENV: ${process.env.NODE_ENV}, PORT: ${process.env.PORT}`);
+      
+      console.log(`\n🎯 [CROWDING API] [${requestId}] Request received`);
+      console.log(`   Origin: ${req.query.origin || 'PALATINE'}`);
+      console.log(`   Destination: ${req.query.destination || 'OTC'}`);
+      console.log(`   Line: ${req.query.line || 'UP-NW'}`);
+      console.log(`   Force refresh: ${req.query.force}`);
       
       // Set a timeout for the response (60 seconds should be enough for scraping)
       // Railway has a 60s request timeout, so we set ours slightly lower
@@ -1253,23 +1196,24 @@ async function startServer() {
           }>;
           
           if (cachedData.length > 0) {
-            console.log('[DEBUG] First cached item:', JSON.stringify(cachedData[0]));
             const result = formatCachedData(cachedData);
             const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at).getTime()) / 1000 / 60);
-            console.log(`[CACHE HIT] Returning cached crowding data for ${origin}->${destination} (${result.crowding.length} trains, ${cacheAge} min old)`);
-            return res.json(result);
+            console.log(`✅ [CROWDING API] Cache HIT - Returning ${result.crowding.length} trains (${cacheAge} min old)`);
+            console.log(`   First 3 trains: ${result.crowding.slice(0, 3).map((t: any) => `${t.trip_id}:${t.crowding}`).join(', ')}`);
+            return clearTimeoutAndSend(result);
           }
           
-          console.log(`[CACHE MISS] No fresh cache for ${origin}->${destination} (checking for stale cache or scraping...)`);
+          console.log(`❌ [CROWDING API] Cache MISS - No fresh data (will scrape or use stale)`);
         }
         
         if (scrapingLocks.has(cacheKey)) {
-          console.log(`Scraping already in progress for ${origin}->${destination}, waiting...`);
+          console.log(`⏳ [CROWDING API] Scraping in progress for ${cacheKey}, waiting...`);
           try {
             const result = await scrapingLocks.get(cacheKey);
-            return res.json(result);
+            console.log(`✅ [CROWDING API] Got result from ongoing scrape: ${result?.crowding?.length || 0} trains`);
+            return clearTimeoutAndSend(result);
           } catch (lockError: any) {
-            console.warn(`Lock wait failed: ${lockError.message}`);
+            console.warn(`⚠️ [CROWDING API] Lock wait failed: ${lockError.message}`);
           }
         }
         
