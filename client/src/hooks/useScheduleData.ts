@@ -383,7 +383,7 @@ export function useScheduleData(
     
     const reloadFromStorage = () => {
       try {
-        const saved = localStorage.getItem(`crowding_${selectedGtfsId}`);
+        const saved = localStorage.getItem(`crowding_${selectedGtfsId}_${direction}`);
         if (saved) {
           const parsed = JSON.parse(saved) as Record<string, CrowdingLevel>;
           const loaded = new Map(Object.entries(parsed));
@@ -489,19 +489,19 @@ export function useScheduleData(
           
           console.log(`💾 [CROWDING FETCH] Processing ${data.length} items...`);
           
-          setCrowdingData(prev => {
-             const next = new Map(prev);
-             newCrowdingMap.forEach((v, k) => next.set(k, v));
-             
-             console.log(`📋 [CROWDING FETCH] Updated crowding map:`, {
-               totalEntries: next.size,
-               sample: Array.from(next.entries()).slice(0, 5)
-             });
-             
-             // Save to localStorage
-             try {
-                const obj = Object.fromEntries(next);
-                localStorage.setItem(`crowding_${selectedGtfsId}`, JSON.stringify(obj));
+          setCrowdingData(() => {
+              // REPLACE instead of merge to avoid stale direction data
+              const next = newCrowdingMap;
+              
+              console.log(`📋 [CROWDING FETCH] Updated crowding map:`, {
+                totalEntries: next.size,
+                sample: Array.from(next.entries()).slice(0, 5)
+              });
+              
+              // Save to localStorage with direction key
+              try {
+                 const obj = Object.fromEntries(next);
+                 localStorage.setItem(`crowding_${selectedGtfsId}_${direction}`, JSON.stringify(obj));
              } catch (e) {}
              return next;
           });
