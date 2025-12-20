@@ -1606,13 +1606,46 @@ async function startServer() {
           console.debug('Could not pre-load positions:', e);
         }
         
-        // Get cached crowding data (from memory cache)
+        // Get crowding data (prefer memory cache, fallback to database for cold starts)
         try {
+          initialData.crowding = {};
+          
           if (crowdingCache.size > 0) {
-            initialData.crowding = {};
+            // Use in-memory cache if available
             crowdingCache.forEach((cached, routeKey) => {
               initialData.crowding[routeKey] = cached.data;
             });
+          } else if (getDatabase) {
+            // Cold start: Load from database for common routes
+            const db = getDatabase();
+            if (db) {
+              const commonRoutes = [
+                { origin: 'PALATINE', dest: 'OTC', line: 'UP-NW' },
+                { origin: 'OTC', dest: 'PALATINE', line: 'UP-NW' },
+                { origin: 'SCHAUM', dest: 'CUS', line: 'MD-W' },
+                { origin: 'CUS', dest: 'SCHAUM', line: 'MD-W' },
+                { origin: 'WILMETTE', dest: 'OTC', line: 'UP-N' },
+                { origin: 'OTC', dest: 'WILMETTE', line: 'UP-N' },
+                { origin: 'WESTMONT', dest: 'CUS', line: 'BNSF' },
+                { origin: 'CUS', dest: 'WESTMONT', line: 'BNSF' }
+              ];
+              
+              for (const route of commonRoutes) {
+                const cacheKey = `${route.origin}_${route.dest}_${route.line}`;
+                const crowdingData = db.prepare(`
+                  SELECT trip_id, crowding, scheduled_departure, predicted_departure,
+                         scheduled_arrival, predicted_arrival
+                  FROM crowding_cache
+                  WHERE origin = ? AND destination = ?
+                    AND updated_at > datetime('now', '-4 hours')
+                `).all(route.origin, route.dest);
+                
+                if (crowdingData.length > 0) {
+                  initialData.crowding[cacheKey] = crowdingData;
+                }
+              }
+              console.log(`[COLD START] Pre-loaded ${Object.keys(initialData.crowding).length} routes from DB`);
+            }
           }
         } catch (e) {
           console.debug('Could not pre-load crowding:', e);
