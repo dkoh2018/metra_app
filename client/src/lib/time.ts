@@ -89,9 +89,10 @@ export function getCurrentMinutesInChicago(): number {
   const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
   const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0');
   
-  // Service Day Logic: If between 00:00 - 03:00, add 24 hours (1440 mins)
-  // This effectively treats 1 AM as "25:00" of the previous day
-  if (hour < 3) {
+  // Service Day Logic: If between 00:00 - 04:00, add 24 hours (1440 mins)
+  // This effectively treats 3 AM as "27:00" of the previous service day
+  // Matches getServiceDayType which uses 4-hour cutoff
+  if (hour < 4) {
     return (hour + 24) * 60 + minute;
   }
   

@@ -230,37 +230,57 @@ async function scrapeAndCacheCrowding(
         scheduleDate = Math.floor(dateOverride.getTime() / 1000);
         console.log(`[${source}] Using schedule override: ${dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago' })}`);
       } else {
-        // FIX: ALWAYS request 4:00 AM Chicago time from Metra's website
-        // This ensures we get the FULL day's schedule including early morning trains,
-        // regardless of when the scrape runs. Metra's website filters out trains
-        // that have already "departed" relative to the requested time.
-        
+        // FIX: Calculate "Service Date" based on 4:00 AM cutoff
+        // If it's before 4:00 AM in Chicago, we want the PREVIOUS day's schedule (late night trains)
+        // If it's after 4:00 AM, we want TODAY's schedule
+
         const now = new Date();
         
-        // Get Chicago date components (for today's date in Chicago timezone)
-        const chicagoDateParts = new Intl.DateTimeFormat('en-US', {
+        // 1. Get current time attributes in Chicago
+        const chicagoTimeParts = new Intl.DateTimeFormat('en-US', {
           timeZone: 'America/Chicago',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: 'numeric',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: 'numeric', minute: 'numeric', second: 'numeric',
           hour12: false
         }).formatToParts(now);
         
-        const chicagoYear = parseInt(chicagoDateParts.find(p => p.type === 'year')?.value || '2025');
-        const chicagoMonth = parseInt(chicagoDateParts.find(p => p.type === 'month')?.value || '1');
-        const chicagoDay = parseInt(chicagoDateParts.find(p => p.type === 'day')?.value || '1');
-        const chicagoHour = parseInt(chicagoDateParts.find(p => p.type === 'hour')?.value || '0');
+        const getPart = (type: string) => parseInt(chicagoTimeParts.find(p => p.type === type)?.value || '0');
         
-        // Always use 4:00 AM Chicago time for TODAY's date
-        // This gives us the full day schedule from first morning train to last night train
-        const chicagoDateStr = `${chicagoYear}-${String(chicagoMonth).padStart(2, '0')}-${String(chicagoDay).padStart(2, '0')}`;
+        let targetYear = getPart('year');
+        let targetMonth = getPart('month');
+        let targetDay = getPart('day');
+        const chicagoHour = getPart('hour');
         
-        // Construct as Chicago local time (central time offset will be applied by Metra's site)
-        // Using ISO format with explicit time - parsed as local time
-        const targetDate = new Date(`${chicagoDateStr}T04:00:00`);
+        // 2. Adjust for Service Day (Rollover at 4:00 AM)
+        if (chicagoHour < 4) {
+             // It's technically "early morning" (e.g. 1AM), but part of "yesterday's" service day
+             // So we go back one day
+             const yesterday = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay - 1));
+             // Re-extract Y/M/D from the adjusted date
+             targetYear = yesterday.getUTCFullYear();
+             targetMonth = yesterday.getUTCMonth() + 1;
+             targetDay = yesterday.getUTCDate();
+             console.log(`[${source}] Early morning detected (${chicagoHour} AM). Using YESTERDAY'S schedule.`);
+        }
+
+        // 3. Construct the target date string (YYYY-MM-DD)
+        const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
         
-        console.log(`[${source}] 📅 Requesting 4:00 AM schedule for ${chicagoDateStr} (current Chicago hour: ${chicagoHour})`);
+        // 4. Create proper Date object for "4:00 AM Chicago Time" on that specific date
+        //    We MUST handle the timezone offset manually to be safe on UTC servers
+        
+        // Get the offset for that specific date/time in Chicago
+        const lookupDate = new Date(`${dateStr}T12:00:00Z`); // Noon UTC is safe for checking offset
+        const timeZoneString = lookupDate.toLocaleString('en-US', { timeZone: 'America/Chicago', timeZoneName: 'short' });
+        const isCST = timeZoneString.includes('Central Standard') || timeZoneString.includes('CST');
+        // CST = UTC-6, CDT = UTC-5
+        const offsetHours = isCST ? 6 : 5; 
+        
+        // 4:00 AM Chicago = (4 + offset) UTC
+        // e.g. 4am CST = 10am UTC
+        const targetDate = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 4 + offsetHours, 0, 0));
+        
+        console.log(`[${source}] 📅 Requesting schedule for Service Day: ${dateStr} (Server: 4:00 AM + ${offsetHours}h offset)`);
         
         scheduleDate = Math.floor(targetDate.getTime() / 1000);
       }
