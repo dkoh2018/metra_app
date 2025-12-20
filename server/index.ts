@@ -690,6 +690,28 @@ async function startServer() {
           
           // Start the daily scheduled scrape task
           scheduleDailyScrapes();
+
+          // [TESTING] 4-Minute Interval for Crowding Data
+          console.log("🧪 [TESTING] Starting 4-minute CROWDING DATA interval for testing...");
+          const runTestScrape = async () => {
+             console.log("🧪 [TESTING] Triggering 4-minute scrape...");
+             const testRoutes = [
+               { origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' },
+               { origin: 'WESTMONT', destination: 'CUS', line: 'BNSF' },
+               { origin: 'SCHAUM', destination: 'CUS', line: 'MD-W' },
+               // Add outbound for checking too
+               { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' }
+             ];
+             
+             for (const route of testRoutes) {
+               try {
+                 await scrapeAndCacheCrowding(route.origin, route.destination, route.line, 'TESTING');
+               } catch (e) { console.error(`[TESTING] Failed scrape for ${route.origin}:`, e); }
+             }
+          };
+          // Run immediately then every 4 mins
+          runTestScrape(); 
+          setInterval(runTestScrape, 4 * 60 * 1000);
           
           if (shouldUpdateGTFS()) {
             console.log("Loading GTFS data into database...");
