@@ -231,18 +231,32 @@ async function scrapeAndCacheCrowding(
         console.log(`[${source}] Using schedule override: ${dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago' })}`);
       } else {
         const now = new Date();
-        const chicagoHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }));
+        const chicagoTimeParts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Chicago',
+          hour: 'numeric',
+          minute: 'numeric',
+          hour12: false
+        }).formatToParts(now);
         
-        // AUTO-CORRECT: If request is between Midnight and 4 AM, force scrape for 4:00 AM Today
-        // This ensures we get the FULL DAY schedule instead of "late night" empty data
-        if (chicagoHour >= 0 && chicagoHour < 4) {
+        const chicagoHour = parseInt(chicagoTimeParts.find(p => p.type === 'hour')?.value || '0');
+        const chicagoMinute = parseInt(chicagoTimeParts.find(p => p.type === 'minute')?.value || '0');
+        
+        // AUTO-CORRECT: "Service Day" Switchover Logic
+        // 1. Late Night (00:00 - 03:55): Use CURRENT time. This gets us "Late Night" trains for the previous service day.
+        // 2. Switchover (03:55 - 04:00): Force 4:00 AM. This pre-loads the "New Day" schedule just before morning service starts.
+        if (chicagoHour === 3 && chicagoMinute >= 55) {
              const today4am = new Date(now);
-             today4am.setHours(4, 0, 0, 0); // 4:00 AM local time (approx, good enough for timestamp)
+             today4am.setHours(4, 0, 0, 0); // Force 4:00 AM
              scheduleDate = Math.floor(today4am.getTime() / 1000);
-             console.log(`[${source}] 🌙 Early morning detected (${chicagoHour} AM). Forcing schedule time to 4:00 AM to get full day data.`);
+             console.log(`[${source}] 🌅 3:55 AM Switchover detected. Forcing schedule time to 4:00 AM to pre-load full day data.`);
         } else {
              scheduleDate = Math.floor(now.getTime() / 1000);
-             console.log(`[${source}] Using current time for schedule`);
+             // Log if we are in the late night window
+             if (chicagoHour >= 0 && chicagoHour < 4) {
+               console.log(`[${source}] 🌙 Late Night scraping (${chicagoHour}:${chicagoMinute.toString().padStart(2, '0')}). Using current time to capture late trains.`);
+             } else {
+               console.log(`[${source}] Using current time for schedule`);
+             }
         }
       }
       
@@ -469,11 +483,11 @@ async function scrapeAndCacheCrowding(
 }
 
 
-// Scheduled Task: Daily Crowding Seed (4:05 AM Chicago Time)
+// Scheduled Task: Daily Crowding Seed (3:55 AM Chicago Time)
 // Runs once per day to fetch FULL DAY crowding predictions for all active routes
 function scheduleDailyScrapes() {
   const runScheduledScrape = async () => {
-    console.log("⏰ [SCHEDULE] Starting daily crowding seed (4:05 AM)...");
+    console.log("⏰ [SCHEDULE] Starting daily crowding seed (3:55 AM)...");
     
     // 1. Identify active routes from recent cache usage
     const db = getDatabase();
@@ -585,11 +599,11 @@ function scheduleDailyScrapes() {
     const chicagoTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Chicago' });
     const chicagoNow = new Date(chicagoTimeStr);
     
-    // Target: 4:05 AM Chicago time
+    // Target: 3:55 AM Chicago time
     const target = new Date(chicagoNow);
-    target.setHours(4, 5, 0, 0);
+    target.setHours(3, 55, 0, 0);
     
-    // If 3:30 AM has passed today, schedule for tomorrow
+    // If 3:55 AM has passed today, schedule for tomorrow
     if (target.getTime() <= chicagoNow.getTime()) {
       target.setDate(target.getDate() + 1);
     }
