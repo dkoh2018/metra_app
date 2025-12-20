@@ -108,6 +108,7 @@ export function NextTrainCard({
   const isSentinel = nextTrain.id === 'SENTINEL_END';
   const sentinelNextDayDep = isSentinel ? (nextTrain as any)._nextDayDeparture : null;
   const sentinelNextDayArr = isSentinel ? (nextTrain as any)._nextDayArrival : null;
+  const sentinelNextTrainId = isSentinel ? (nextTrain as any)._nextDayTrainId : null;
 
   // Format time for display - handles GTFS overnight times
   const formatTime = useCallback((timeStr: string) => {
@@ -172,9 +173,9 @@ export function NextTrainCard({
     ? formatPredictedTimeForCard(predictedArrivalData.scheduled)
     : null;
   
-  const crowdingLevel = tripId 
-    ? (crowdingData.get(tripId) || crowdingData.get(nextTrain.id))
-    : crowdingData.get(nextTrain.id);
+  // LOGIC CHANGE: Check sentinel ID for crowding too
+  const targetId = isSentinel ? sentinelNextTrainId : (tripId || nextTrain.id);
+  const crowdingLevel = targetId ? (crowdingData.get(targetId) || crowdingData.get(nextTrain.id)) : null;
 
   return (
     <div className={cn(
@@ -195,7 +196,7 @@ export function NextTrainCard({
         </div>
         <div className="flex items-center gap-1.5">
 
-          {!isSentinel && crowdingLevel && (
+          {crowdingLevel && (
             <span className={cn(
               "px-2 py-0.5 rounded text-xs font-semibold uppercase",
               CROWDING_BADGE_STYLES[crowdingLevel],
