@@ -59,13 +59,21 @@ export function useScheduleData(
       const now = getChicagoTime();
       setCurrentTime(now);
       
-      const currentServiceDay = getServiceDayType(now);
-      setDayType(prev => {
-        if (prev !== currentServiceDay) {
-          return currentServiceDay;
-        }
-        return prev;
-      });
+      const chicagoTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    
+      // Check if we are in the "Late Night" window (00:00 - 03:00)
+      // If so, subtract 3 hours to push us back to the "previous day"
+      if (chicagoTime.getHours() < 3) {
+        chicagoTime.setHours(chicagoTime.getHours() - 3);
+      }
+
+      const day = chicagoTime.getDay();
+      let type: DayType = 'weekday';
+      if (day === 0) type = 'sunday'; // Sunday
+      else if (day === 6) type = 'saturday'; // Saturday
+      else type = 'weekday';
+      
+      setDayType(type);
     }, 15000);
     return () => clearInterval(timer);
   }, []);
