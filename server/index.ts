@@ -655,6 +655,76 @@ function scheduleDailyScrapes() {
   scheduleNextRun();
 }
 
+// Frequent Delay Scraping (every 10 minutes during active hours)
+// This provides more real-time delay info from the Metra website strike-out times
+// Runs 5 AM - 10 PM Chicago time only to avoid unnecessary late-night scraping
+function scheduleFrequentDelayScrapes() {
+  // All routes we want to scrape for delay data
+  const ALL_ROUTES = [
+    { origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' },
+    { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' },
+    { origin: 'SCHAUM', destination: 'CUS', line: 'MD-W' },
+    { origin: 'CUS', destination: 'SCHAUM', line: 'MD-W' },
+    { origin: 'WILMETTE', destination: 'OTC', line: 'UP-N' },
+    { origin: 'OTC', destination: 'WILMETTE', line: 'UP-N' },
+    { origin: 'WESTMONT', destination: 'CUS', line: 'BNSF' },
+    { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' }
+  ];
+
+  const SCRAPE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+  const CONCURRENCY = 2; // Process 2 routes at a time to avoid overwhelming
+
+  const runDelayScrape = async () => {
+    // Check if we're in active hours (5 AM - 10 PM Chicago)
+    const now = new Date();
+    const chicagoHour = parseInt(now.toLocaleString('en-US', { 
+      timeZone: 'America/Chicago', 
+      hour: 'numeric', 
+      hour12: false 
+    }));
+
+    if (chicagoHour < 5 || chicagoHour >= 22) {
+      console.log(`🌙 [DELAY SCRAPE] Skipping - off hours (${chicagoHour}:00 Chicago)`);
+      return;
+    }
+
+    console.log(`⏱️ [DELAY SCRAPE] Starting frequent scrape (${chicagoHour}:${now.getMinutes().toString().padStart(2, '0')} Chicago)...`);
+
+    // Process routes in chunks
+    for (let i = 0; i < ALL_ROUTES.length; i += CONCURRENCY) {
+      const chunk = ALL_ROUTES.slice(i, i + CONCURRENCY);
+      
+      await Promise.all(chunk.map(async ({ origin, destination, line }) => {
+        try {
+          await scrapeAndCacheCrowding(origin, destination, line, 'DELAY_REFRESH');
+        } catch (error: any) {
+          // Don't log full error for routine failures
+          console.warn(`[DELAY] ${origin}->${destination}: ${error.message?.substring(0, 50) || 'failed'}`);
+        }
+      }));
+      
+      // Small pause between chunks to be gentle on Metra's servers
+      if (i + CONCURRENCY < ALL_ROUTES.length) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    console.log(`✅ [DELAY SCRAPE] Completed all routes`);
+  };
+
+  // Start interval - aligned to 10 minute marks
+  const now = new Date();
+  const msSinceLastTen = now.getTime() % SCRAPE_INTERVAL_MS;
+  const msToNextSync = SCRAPE_INTERVAL_MS - msSinceLastTen;
+
+  console.log(`⏱️ [DELAY SCRAPE] Will start in ${Math.round(msToNextSync / 1000 / 60)} min, then every 10 min during active hours (5AM-10PM)`);
+
+  setTimeout(() => {
+    runDelayScrape();
+    setInterval(runDelayScrape, SCRAPE_INTERVAL_MS);
+  }, msToNextSync);
+}
+
 async function startServer() {
   try {
     const app = express();
@@ -695,6 +765,9 @@ async function startServer() {
           
           // Start the daily scheduled scrape task
           scheduleDailyScrapes();
+          
+          // Start the 10-minute delay scrape task (active hours only)
+          scheduleFrequentDelayScrapes();
 
           // [TESTING] 4-Minute Interval for Crowding Data
           console.log("🧪 [TESTING] Starting 4-minute CROWDING DATA interval for testing...");
