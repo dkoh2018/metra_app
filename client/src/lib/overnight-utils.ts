@@ -77,6 +77,17 @@ export function normalizeGtfsOvernightTime(trainMinutes: number): number {
  * Handles overnight edge cases
  */
 export function hasTrainDeparted(trainMinutes: number, currentMinutes: number): boolean {
+  // EXTENDED DAY LOGIC:
+  // If current time is > 24h (e.g. 25:30 for 1:30 AM), we need to compare apples to apples.
+  if (currentMinutes >= OVERNIGHT_CONFIG.MINUTES_PER_DAY) {
+    let adjustedTrain = trainMinutes;
+    // If train is "00:15", treat it as "24:15"
+    if (isEarlyMorningTrain(trainMinutes) && !isGtfsOvernightTime(trainMinutes)) {
+      adjustedTrain += OVERNIGHT_CONFIG.MINUTES_PER_DAY;
+    }
+    return adjustedTrain < currentMinutes;
+  }
+
   // GTFS 24:XX times in early morning are still upcoming
   if (isGtfsOvernightTime(trainMinutes)) {
     if (isEarlyMorning(currentMinutes)) {

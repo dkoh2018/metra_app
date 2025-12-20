@@ -230,34 +230,39 @@ async function scrapeAndCacheCrowding(
         scheduleDate = Math.floor(dateOverride.getTime() / 1000);
         console.log(`[${source}] Using schedule override: ${dateOverride.toLocaleString('en-US', { timeZone: 'America/Chicago' })}`);
       } else {
+        // FIX: ALWAYS request 4:00 AM Chicago time from Metra's website
+        // This ensures we get the FULL day's schedule including early morning trains,
+        // regardless of when the scrape runs. Metra's website filters out trains
+        // that have already "departed" relative to the requested time.
+        
         const now = new Date();
-        const chicagoTimeParts = new Intl.DateTimeFormat('en-US', {
+        
+        // Get Chicago date components (for today's date in Chicago timezone)
+        const chicagoDateParts = new Intl.DateTimeFormat('en-US', {
           timeZone: 'America/Chicago',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
           hour: 'numeric',
-          minute: 'numeric',
           hour12: false
         }).formatToParts(now);
         
-        const chicagoHour = parseInt(chicagoTimeParts.find(p => p.type === 'hour')?.value || '0');
-        const chicagoMinute = parseInt(chicagoTimeParts.find(p => p.type === 'minute')?.value || '0');
+        const chicagoYear = parseInt(chicagoDateParts.find(p => p.type === 'year')?.value || '2025');
+        const chicagoMonth = parseInt(chicagoDateParts.find(p => p.type === 'month')?.value || '1');
+        const chicagoDay = parseInt(chicagoDateParts.find(p => p.type === 'day')?.value || '1');
+        const chicagoHour = parseInt(chicagoDateParts.find(p => p.type === 'hour')?.value || '0');
         
-        // AUTO-CORRECT: "Service Day" Switchover Logic
-        // 1. Late Night (00:00 - 03:55): Use CURRENT time. This gets us "Late Night" trains for the previous service day.
-        // 2. Switchover (03:55 - 04:00): Force 4:00 AM. This pre-loads the "New Day" schedule just before morning service starts.
-        if (chicagoHour === 3 && chicagoMinute >= 55) {
-             const today4am = new Date(now);
-             today4am.setHours(4, 0, 0, 0); // Force 4:00 AM
-             scheduleDate = Math.floor(today4am.getTime() / 1000);
-             console.log(`[${source}] 🌅 3:55 AM Switchover detected. Forcing schedule time to 4:00 AM to pre-load full day data.`);
-        } else {
-             scheduleDate = Math.floor(now.getTime() / 1000);
-             // Log if we are in the late night window
-             if (chicagoHour >= 0 && chicagoHour < 4) {
-               console.log(`[${source}] 🌙 Late Night scraping (${chicagoHour}:${chicagoMinute.toString().padStart(2, '0')}). Using current time to capture late trains.`);
-             } else {
-               console.log(`[${source}] Using current time for schedule`);
-             }
-        }
+        // Always use 4:00 AM Chicago time for TODAY's date
+        // This gives us the full day schedule from first morning train to last night train
+        const chicagoDateStr = `${chicagoYear}-${String(chicagoMonth).padStart(2, '0')}-${String(chicagoDay).padStart(2, '0')}`;
+        
+        // Construct as Chicago local time (central time offset will be applied by Metra's site)
+        // Using ISO format with explicit time - parsed as local time
+        const targetDate = new Date(`${chicagoDateStr}T04:00:00`);
+        
+        console.log(`[${source}] 📅 Requesting 4:00 AM schedule for ${chicagoDateStr} (current Chicago hour: ${chicagoHour})`);
+        
+        scheduleDate = Math.floor(targetDate.getTime() / 1000);
       }
       
       const { getMetraScheduleUrl } = await import("@shared/metra-urls");
