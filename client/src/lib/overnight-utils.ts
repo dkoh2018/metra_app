@@ -138,7 +138,11 @@ export function getMinutesUntilTrain(trainMinutes: number, currentMinutes: numbe
   }
   
   // Very negative - might need to add a day
-  if (minutesUntil < -60) {
+  // BUT: Do not add a day if we are already in "Extended Service Day" mode (Current Time > 24 hours)
+  // because that means we are already looking at "late night" as "today"
+  const isExtendedDay = currentMinutes >= OVERNIGHT_CONFIG.MINUTES_PER_DAY;
+  
+  if (minutesUntil < -60 && !isExtendedDay) {
     minutesUntil += OVERNIGHT_CONFIG.MINUTES_PER_DAY;
   }
   
