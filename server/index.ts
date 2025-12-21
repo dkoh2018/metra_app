@@ -6,6 +6,27 @@ import { Browser, ChromeReleaseChannel, computeExecutablePath, install, resolveB
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
+// Helper to load Puppeteer with Stealth Plugin (if available) or fallback to standard
+async function getPuppeteer() {
+  try {
+    // Try loading stealth dependencies (installed on Railway)
+    // @ts-ignore - may be missing locally
+    const { default: puppeteer } = await import("puppeteer-extra");
+    // @ts-ignore - may be missing locally
+    const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
+    
+    puppeteer.use(StealthPlugin());
+    console.log("🥸 [PUPPETEER] Using Stealth Mode (puppeteer-extra)");
+    return puppeteer;
+  } catch (e) {
+    // Fallback to standard puppeteer (for local dev)
+    console.log("🤖 [PUPPETEER] Using Standard Mode (puppeteer)");
+    const { default: puppeteer } = await import("puppeteer");
+    return puppeteer;
+  }
+}
+
+
 // Database imports are lazy-loaded to allow server to start without database
 let getAllSchedules: any, getNextTrain: any, shouldUpdateGTFS: any;
 let getAllDelays: any, updateRealtimeData: any;
@@ -295,9 +316,17 @@ async function scrapeAndCacheCrowding(
       });
       console.log(`[${source}] Constructed URL: ${url}`);
       
+      // Add a random delay before launching browser to avoid being too predictable
+      // if (runMode !== 'TESTING') await new Promise(r => setTimeout(r, Math.random() * 2000 + 1000));
+      
       scrapeBrowser = await puppeteer.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled' // Extra stealth
+        ],
         executablePath,
         timeout: 30000,
         env: { ...process.env, TZ: 'America/Chicago' }
