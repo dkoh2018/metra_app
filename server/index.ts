@@ -767,18 +767,12 @@ function scheduleFrequentDelayScrapes() {
   const CONCURRENCY = 2; // Process 2 routes at a time to avoid overwhelming
 
   const runDelayScrape = async () => {
-    // Check if we're in active hours (5 AM - 10 PM Chicago)
     const now = new Date();
     const chicagoHour = parseInt(now.toLocaleString('en-US', { 
       timeZone: 'America/Chicago', 
       hour: 'numeric', 
       hour12: false 
     }));
-
-    if (chicagoHour < 5 || chicagoHour >= 22) {
-      console.log(`🌙 [DELAY SCRAPE] Skipping - off hours (${chicagoHour}:00 Chicago)`);
-      return;
-    }
 
     console.log(`⏱️ [DELAY SCRAPE] Starting frequent scrape (${chicagoHour}:${now.getMinutes().toString().padStart(2, '0')} Chicago)...`);
 
@@ -1407,7 +1401,9 @@ async function startServer() {
             const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at + 'Z').getTime()) / 1000 / 60);
             console.log(`✅ [CROWDING API] Cache HIT - Returning ${result.crowding.length} trains (${cacheAge} min old)`);
             if (isProblemRoute) {
+              const sampleIds = result.crowding.slice(0, 5).map((t: any) => t.trip_id).join(', ');
               console.log(`🔍 [DEBUG-ROUTE] ${origin}->${destination} CACHE HIT: ${cachedData.length} raw, ${result.crowding.length} formatted`);
+              console.log(`🔍 [DEBUG-ROUTE] Sample trip IDs: ${sampleIds}`);
             }
             return clearTimeoutAndSend(result);
           }
