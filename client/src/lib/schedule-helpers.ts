@@ -24,30 +24,54 @@ export const CROWDING_LABELS: Record<CrowdingLevel, string> = {
   high: "High"
 };
 
-// Transform API train to frontend Train format
-export function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string>): Train {
-  // Extract train number from trip_id (e.g. "UP-NW_UNW608_V1_A" -> "608")
-  // Or "MD-W_MW2200_V2_A" -> "2200"
+// Reusable helper to extract train number from a Trip ID
+// Handles standard (UP-NW_UN608...), legacy, and simplified/naked (UP-N_345...) formats
+export function extractTrainIdFromTripId(tripId: string): string {
+  if (!tripId) return "Unknown";
+  
   let trainId = "Unknown";
   
-  // Try regex match first
-  const match = apiTrain.trip_id.match(TRIP_ID_REGEX);
+  // Strategy 0: Direct Regex Match (Looking for UN608, MW2200, UW500, BN1200)
+  const match = tripId.match(TRIP_ID_REGEX);
   if (match && match[1]) {
-    trainId = match[1];
-  } else {
-    // Fallback: split by _ and try to find the part with digits
-    const parts = apiTrain.trip_id.split('_');
-    // Updated to include BN (BNSF) and UW (UP-W)
-    const numberPart = parts.find(p => /\d+/.test(p) && (p.toUpperCase().includes('UNW') || p.toUpperCase().includes('MW') || p.toUpperCase().includes('UN') || p.toUpperCase().includes('BN') || p.toUpperCase().includes('UW')));
-    if (numberPart) {
-      trainId = numberPart.toUpperCase()
-        .replace('UNW', '')
-        .replace('MW', '')
-        .replace('UN', '')
-        .replace('BN', '')
-        .replace('UW', '');
-    }
+    return match[1];
   }
+  
+  // Fallback: split by _ and try to find the part with digits
+  const parts = tripId.split('_');
+  
+  // Strategy 1: Look for Prefixed Pattern (UNW608, MW2200, etc) inside parts
+  // Example: UP-NW_UNW608_V1_A -> "UNW608"
+  let numberPart = parts.find(p => /\d+/.test(p) && (
+    p.toUpperCase().includes('UNW') || 
+    p.toUpperCase().includes('MW') || 
+    p.toUpperCase().includes('UN') || 
+    p.toUpperCase().includes('BN') || 
+    p.toUpperCase().includes('UW')
+  ));
+  
+  // Strategy 2: Look for Naked Number Pattern (345, 516, 2200) if no prefix found
+  // Must be 3-4 digits. This handles cases like "UP-N_345_V1_A" where prefix is missing.
+  if (!numberPart) {
+    numberPart = parts.find(p => /^\d{3,4}$/.test(p));
+  }
+
+  if (numberPart) {
+    trainId = numberPart.toUpperCase()
+      .replace('UNW', '')
+      .replace('MW', '')
+      .replace('UN', '')
+      .replace('BN', '')
+      .replace('UW', '');
+  }
+  
+  return trainId;
+}
+
+// Transform API train to frontend Train format
+export function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string>): Train {
+  // Extract train number from trip_id using centralized logic
+  const trainId = extractTrainIdFromTripId(apiTrain.trip_id);
 
   // Populate map for reverse lookup (Train # -> Trip ID)
   if (trainId !== "Unknown") {
