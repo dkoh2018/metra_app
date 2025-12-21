@@ -11,16 +11,32 @@ export interface DayType {
   outbound: TrainSchedule[];
 }
 
-// Cache service IDs per day type to avoid repeated queries
-const serviceIdCache = new Map<'weekday' | 'saturday' | 'sunday', string[]>();
+// Cache service IDs per day type (key: dayType_date)
+const serviceIdCache = new Map<string, string[]>();
 
 /**
- * Get service IDs for a specific day type (cached)
+ * Get current date in YYYYMMDD format for Chicago
+ */
+function getCurrentDateString(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date()).replace(/-/g, '');
+}
+
+/**
+ * Get service IDs for a specific day type (cached by dayType + date)
  */
 function getServiceIdsForDayType(dayType: 'weekday' | 'saturday' | 'sunday'): string[] {
+  const currentDate = getCurrentDateString();
+  const cacheKey = `${dayType}_${currentDate}`;
+  
   // Return cached value if available
-  if (serviceIdCache.has(dayType)) {
-    return serviceIdCache.get(dayType)!;
+  // Note: key includes date, so it auto-refreshes daily
+  if (serviceIdCache.has(cacheKey as any)) {
+    return serviceIdCache.get(cacheKey as any)!;
   }
   
   const db = getDatabase();
@@ -35,15 +51,18 @@ function getServiceIdsForDayType(dayType: 'weekday' | 'saturday' | 'sunday'): st
     dayColumn = 'sunday = 1';
   }
   
+  // Filter by date range to avoid overlapping schedule versions (e.g. standard vs holiday)
   const serviceIds = db.prepare(`
-    SELECT service_id FROM service_calendar WHERE ${dayColumn}
-  `).all() as Array<{ service_id: string }>;
+    SELECT service_id FROM service_calendar 
+    WHERE ${dayColumn}
+      AND start_date <= ? 
+      AND end_date >= ?
+  `).all(currentDate, currentDate) as Array<{ service_id: string }>;
   
   const serviceIdList = serviceIds.map(s => s.service_id);
-  // Don't close - connection is reused for better performance
   
   // Cache the result
-  serviceIdCache.set(dayType, serviceIdList);
+  serviceIdCache.set(cacheKey as any, serviceIdList);
   
   return serviceIdList;
 }
