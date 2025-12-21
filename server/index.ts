@@ -38,6 +38,23 @@ let getDatabase: any;
 const scrapingLocks = new Map<string, Promise<any>>();
 
 // ============================================
+// SCRAPE STATISTICS (for debugging Railway issues)
+// ============================================
+const scrapeStats = {
+  totalAttempts: 0,
+  successCount: 0,
+  failCount: 0,
+  lastFailReason: '',
+  failedRoutes: new Set<string>(),
+  successfulRoutes: new Set<string>(),
+  get successRate() {
+    return this.totalAttempts > 0 
+      ? Math.round((this.successCount / this.totalAttempts) * 100) 
+      : 0;
+  }
+};
+
+// ============================================
 // TIME-BASED POLLING CONFIGURATION
 // ============================================
 // Active hours: 4 AM - 6 PM Chicago time (commute hours)
@@ -351,18 +368,42 @@ async function scrapeAndCacheCrowding(
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
       });
       
-      // DEBUG: Forward browser console logs to server terminal
-      page.on('console', (msg: any) => console.log(`[BROWSER_LOG] ${msg.type().toUpperCase()}: ${msg.text()}`));
+      // Track HTTP responses to detect WAF blocks
+      let httpStatus = 0;
+      let wasBlocked = false;
+      
+      page.on('response', (response: any) => {
+        if (response.url().includes('metra.com/schedules')) {
+          httpStatus = response.status();
+          if (httpStatus === 403) {
+            wasBlocked = true;
+            console.error(`🚫 [WAF_BLOCK] HTTP 403 received for ${origin}->${destination}`);
+          }
+        }
+      });
       
       // Navigate
+      console.log(`[SCRAPE] 🌐 Navigating to Metra... (attempt #${scrapeStats.totalAttempts + 1})`);
       await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
       
-      // DEBUG: Check if page loaded correctly
+      // Check if page loaded correctly
       const pageTitle = await page.title();
-      console.log(`[DEBUG_SCRAPE] Page loaded: "${pageTitle}"`);
+      
+      // Detect WAF block page
+      if (pageTitle.includes('ERROR') || pageTitle.includes('Request could not be satisfied') || wasBlocked) {
+        scrapeStats.totalAttempts++;
+        scrapeStats.failCount++;
+        scrapeStats.lastFailReason = `WAF_BLOCK (HTTP ${httpStatus})`;
+        scrapeStats.failedRoutes.add(`${origin}->${destination}`);
+        console.error(`🚫 [SCRAPE] WAF BLOCKED: ${origin}->${destination} (HTTP ${httpStatus})`);
+        console.log(`📊 [STATS] Success Rate: ${scrapeStats.successRate}% (${scrapeStats.successCount}/${scrapeStats.totalAttempts})`);
+        throw new Error(`WAF blocked request (HTTP ${httpStatus})`);
+      }
+      
+      console.log(`[SCRAPE] ✅ Page loaded: "${pageTitle}" (HTTP ${httpStatus})`);
       
       await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {
-        console.warn(`[DEBUG_SCRAPE] Timed out waiting for .trip-row selector`);
+        console.warn(`[SCRAPE] ⚠️ Timed out waiting for .trip-row selector`);
       });
       
       // Extract data (Same logic as before)
@@ -522,9 +563,21 @@ async function scrapeAndCacheCrowding(
       }
 
       if (extractedData.crowding.length === 0) {
-        console.warn(`[WARNING] No crowding data extracted from Metra website for ${origin}->${destination}`);
+        scrapeStats.totalAttempts++;
+        scrapeStats.failCount++;
+        scrapeStats.lastFailReason = 'NO_DATA_EXTRACTED';
+        scrapeStats.failedRoutes.add(`${origin}->${destination}`);
+        console.warn(`[SCRAPE] ⚠️ No crowding data extracted for ${origin}->${destination}`);
+        console.log(`📊 [STATS] Success Rate: ${scrapeStats.successRate}% (${scrapeStats.successCount}/${scrapeStats.totalAttempts})`);
         throw new Error('No crowding data extracted from Metra website');
       }
+      
+      // SUCCESS! Track it
+      scrapeStats.totalAttempts++;
+      scrapeStats.successCount++;
+      scrapeStats.successfulRoutes.add(`${origin}->${destination}`);
+      console.log(`✅ [SCRAPE] SUCCESS: ${origin}->${destination} (${extractedData.crowding.length} trains)`);
+      console.log(`📊 [STATS] Success Rate: ${scrapeStats.successRate}% (${scrapeStats.successCount}/${scrapeStats.totalAttempts})`);
       
       await scrapeBrowser.close();
       
@@ -963,6 +1016,22 @@ async function startServer() {
     app.get("/api/positions", (_req, res) => fetchData("positions", res));
     app.get("/api/tripupdates", (_req, res) => fetchData("tripupdates", res));
     app.get("/api/alerts", (_req, res) => fetchData("alerts", res));
+    
+    // Debug endpoint: Scrape statistics for Railway debugging
+    app.get("/api/scrape-stats", (_req, res) => {
+      res.json({
+        totalAttempts: scrapeStats.totalAttempts,
+        successCount: scrapeStats.successCount,
+        failCount: scrapeStats.failCount,
+        successRate: `${scrapeStats.successRate}%`,
+        lastFailReason: scrapeStats.lastFailReason || 'none',
+        failedRoutes: Array.from(scrapeStats.failedRoutes),
+        successfulRoutes: Array.from(scrapeStats.successfulRoutes),
+        environment: process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV || 'local',
+        serverTime: new Date().toISOString(),
+        chicagoTime: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })
+      });
+    });
 
     // Line-specific train positions (UP-NW, MD-W, etc.)
     // Cache positions to prevent hitting Metra rate limits with multiple users

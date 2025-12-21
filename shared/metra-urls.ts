@@ -6,14 +6,14 @@
 export interface MetraUrlOptions {
   origin: string;
   destination: string;
-  line?: string;
+  line: string;
   date?: Date | number | string;
 }
 
 export function getMetraScheduleUrl({ 
   origin, 
   destination, 
-  line = 'UP-NW', 
+  line, 
   date 
 }: MetraUrlOptions): string {
   // Default to now if no date provided
@@ -24,10 +24,10 @@ export function getMetraScheduleUrl({
   // Metra's site expects `time` parameter as unix timestamp (seconds).
   const timestamp = Math.floor(targetDate.getTime() / 1000);
   
-  // Ensure we have valid strings
-  const orig = origin || 'PALATINE';
-  const dest = destination || 'OTC';
-  const lineId = line || 'UP-NW';
+  // Use passed values directly - callers are responsible for providing valid station/line IDs
+  const orig = origin;
+  const dest = destination;
+  const lineId = line;
   
   // Construct the URL
   // Parameters:

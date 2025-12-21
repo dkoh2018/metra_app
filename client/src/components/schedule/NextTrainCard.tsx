@@ -410,9 +410,9 @@ export function NextTrainCard({
             href={(() => {
               const now = new Date();
               const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
-              const origin = direction === 'inbound' ? selectedGtfsId : (selectedStation.terminal || 'OTC');
-              const dest = direction === 'inbound' ? (selectedStation.terminal || 'OTC') : selectedGtfsId;
-              const line = selectedStation.line || 'UP-NW';
+              const origin = direction === 'inbound' ? selectedGtfsId : selectedStation.terminal;
+              const dest = direction === 'inbound' ? selectedStation.terminal : selectedGtfsId;
+              const line = selectedStation.line;
               
               return getMetraScheduleUrl({
                 origin,
