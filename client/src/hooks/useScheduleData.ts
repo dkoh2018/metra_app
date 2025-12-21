@@ -45,6 +45,7 @@ export function useScheduleData(
   const fetchCrowdingRef = useRef<((forceRefresh?: boolean) => void) | null>(null);
   const lastFetchMinuteRef = useRef<number | null>(null);
   const isFetchingCrowdingRef = useRef<boolean>(false);
+  const retryCountRef = useRef(0);
 
   // Initialize day type based on current service day
   useEffect(() => {
@@ -394,11 +395,14 @@ export function useScheduleData(
       }
     };
 
-    const fetchCrowding = (forceRefresh = false) => {
+    const MAX_RETRIES = 6; // Up to 30 seconds of aggressive retrying
+
+    const fetchCrowding = (forceRefresh = false, isRetry = false) => {
       if (isFetchingCrowdingRef.current && !forceRefresh) return;
       
       const currentMin = Math.floor(Date.now() / 60000);
-      if (!forceRefresh && lastFetchMinuteRef.current === currentMin) return;
+      // Skip throttle check if we are forcing refresh OR retrying (smart retry)
+      if (!forceRefresh && !isRetry && lastFetchMinuteRef.current === currentMin) return;
       
       lastFetchMinuteRef.current = currentMin;
       isFetchingCrowdingRef.current = true;
@@ -416,7 +420,7 @@ export function useScheduleData(
       
       if (forceRefresh) params.append('force', 'true');
       
-      console.log(`🔄 [CROWDING FETCH] Request:`, { origin, dest, line: selectedStation.line, force: forceRefresh });
+      console.log(`🔄 [CROWDING FETCH] Request:`, { origin, dest, line: selectedStation.line, force: forceRefresh, retry: isRetry });
       
       fetch(`/api/crowding?${params.toString()}`)
         .then(res => {
@@ -435,6 +439,36 @@ export function useScheduleData(
           if (response.error) throw new Error(response.error);
           
           const data = response.crowding;
+          
+          // --- SMART RETRY LOGIC ---
+          // If we got valid empty data (meaning "no trains found" or "scraper ran but found nothing yet")
+          // We want to retry aggressively for a short period to handle cold starts
+          if ((!Array.isArray(data) || data.length === 0) && !response.error) {
+             if (retryCountRef.current < MAX_RETRIES) {
+               const nextRetry = retryCountRef.current + 1;
+               console.log(`❄️ [CROWDING] Cold start detected (empty data). Smart Retrying in 5s (Attempt ${nextRetry}/${MAX_RETRIES})...`);
+               retryCountRef.current = nextRetry;
+               
+               // Reset fetching flag so the retry can pass
+               isFetchingCrowdingRef.current = false;
+               
+               setTimeout(() => {
+                 // Call with isRetry=true to bypass the minute throttle
+                 fetchCrowding(false, true); 
+               }, 5000);
+               return; 
+             } else {
+               console.log(`❄️ [CROWDING] Max retries reached (${MAX_RETRIES}). Falling back to standard minute interval.`);
+             }
+          } else if (Array.isArray(data) && data.length > 0) {
+             // We got data! Reset retry counter
+             if (retryCountRef.current > 0) {
+                console.log(`✅ [CROWDING] Smart Retry successful after ${retryCountRef.current} attempts!`);
+             }
+             retryCountRef.current = 0;
+          }
+          // -------------------------
+
           if (!Array.isArray(data)) {
              console.warn("⚠️ [CROWDING FETCH] Invalid crowding list received:", response);
              return; 
