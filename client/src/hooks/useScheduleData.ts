@@ -92,6 +92,10 @@ export function useScheduleData(
         setDayType(baseServiceDay);
       }
     }, 15000);
+    
+    // Initial log
+    console.log(`[DEBUG] 🕒 Current Time: ${getChicagoTime().toLocaleTimeString()}, Service Day: ${getServiceDayType(getChicagoTime())}`);
+    
     return () => clearInterval(timer);
   }, [scheduleData]); // Re-run when scheduleData changes
 
@@ -234,6 +238,7 @@ export function useScheduleData(
           try {
              import('@/lib/scheduleData').then(mod => {
                  setScheduleData(mod.scheduleData as unknown as ScheduleDataState);
+                 console.log(`[DEBUG] ⚠️ Using fallback local schedule data`);
              });
           } catch (e) {
              console.error("Fallback load failed", e);
@@ -513,7 +518,10 @@ export function useScheduleData(
              }
           });
           
-          console.log(`💾 [CROWDING FETCH] Processing ${data.length} items...`);
+
+          
+          console.log(`[DEBUG] 💾 [CROWDING FETCH] Received ${data.length} crowding items from backend`);
+          console.log(`[DEBUG] 🔍 First 3 items:`, data.slice(0, 3));
           
           setCrowdingData(() => {
               // REPLACE instead of merge to avoid stale direction data

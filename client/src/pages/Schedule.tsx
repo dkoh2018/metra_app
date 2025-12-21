@@ -121,9 +121,12 @@ export default function Schedule() {
   // Memoize current trains list
   const currentTrains = useMemo(() => {
     if (!scheduleData[dayType]) return [];
-    return direction === 'inbound' 
+    const trains = direction === 'inbound' 
       ? scheduleData[dayType].inbound 
       : scheduleData[dayType].outbound;
+      
+    console.log(`[DEBUG] 🚆 Rendering Schedule: ${dayType}, Direction: ${direction}, Count: ${trains?.length || 0}`);
+    return trains;
   }, [direction, dayType, scheduleData]);
 
   return (
