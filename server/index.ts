@@ -384,10 +384,13 @@ async function scrapeAndCacheCrowding(
       
       // Navigate
       console.log(`[SCRAPE] 🌐 Navigating to Metra... (attempt #${scrapeStats.totalAttempts + 1})`);
+      const navStartTime = Date.now();
       await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
+      const navEndTime = Date.now();
       
       // Check if page loaded correctly
       const pageTitle = await page.title();
+      console.log(`[TIMING] ⏱️ Navigation took ${navEndTime - navStartTime}ms for ${origin}->${destination}`);
       
       // Detect WAF block page
       if (pageTitle.includes('ERROR') || pageTitle.includes('Request could not be satisfied') || wasBlocked) {
@@ -400,11 +403,35 @@ async function scrapeAndCacheCrowding(
         throw new Error(`WAF blocked request (HTTP ${httpStatus})`);
       }
       
-      console.log(`[SCRAPE] ✅ Page loaded: "${pageTitle}" (HTTP ${httpStatus})`);
+      console.log(`[DEBUG_SCRAPE] Page loaded: "${pageTitle}" (HTTP ${httpStatus})`);
       
-      await page.waitForSelector('.trip-row', { timeout: 10000 }).catch(() => {
-        console.warn(`[SCRAPE] ⚠️ Timed out waiting for .trip-row selector`);
-      });
+      // TIMING DIAGNOSTICS: Track how long it takes for .trip-row to appear
+      const selectorWaitStart = Date.now();
+      let selectorFound = false;
+      
+      await page.waitForSelector('.trip-row', { timeout: 34000 })
+        .then(() => {
+          selectorFound = true;
+          const selectorWaitEnd = Date.now();
+          console.log(`[TIMING] ✅ .trip-row appeared after ${selectorWaitEnd - selectorWaitStart}ms for ${origin}->${destination}`);
+        })
+        .catch(() => {
+          const selectorWaitEnd = Date.now();
+          console.warn(`[TIMING] ❌ .trip-row TIMEOUT after ${selectorWaitEnd - selectorWaitStart}ms for ${origin}->${destination}`);
+        });
+      
+      // DIAGNOSTIC: If selector timed out, check if elements appeared AFTER timeout
+      // This helps us understand if we just need a longer timeout
+      if (!selectorFound) {
+        // Wait an extra 5 seconds and check again
+        console.log(`[TIMING] 🔍 Checking if .trip-row appears with extended wait...`);
+        await new Promise(r => setTimeout(r, 5000));
+        const tripRowCount = await page.$$eval('.trip-row', (rows: Element[]) => rows.length);
+        console.log(`[TIMING] 🔍 After +5s extra wait: Found ${tripRowCount} .trip-row elements for ${origin}->${destination}`);
+        if (tripRowCount > 0) {
+          console.log(`[TIMING] 💡 RECOMMENDATION: Increase timeout! Data appeared after ${Date.now() - selectorWaitStart}ms total`);
+        }
+      }
       
       // Extract data (Same logic as before)
       const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string, scheduleDate: number) => {
