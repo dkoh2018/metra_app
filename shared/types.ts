@@ -12,6 +12,10 @@ export interface Station {
   gtfsId?: string;
   line: LineId;
   terminal: 'OTC' | 'CUS';
+  theme?: {
+    primaryColor?: string;
+    bannerMessage?: string;
+  };
 }
 
 export interface Train {

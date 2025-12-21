@@ -3,11 +3,11 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-
 import { RotateCcw } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { STATIONS, type Station } from '@/lib/stations';
+import { STATIONS } from '@/lib/stations';
+import { Train, Station } from '@shared/types';
+import { MAP_CONFIG } from '@shared/config';
 import { SUPPORTED_LINES } from '@shared/constants';
 
-// Key stations on the UP-NW line (full line from Harvard to Chicago)
-// Coordinates from GTFS stops.txt
 // Key stations on the UP-NW line (full line from Harvard to Chicago)
 // Coordinates from GTFS stops.txt
 // Station definitions moved to @/lib/stations.ts
@@ -589,8 +589,8 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
         >
           <ResetZoomControl />
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={MAP_CONFIG.ATTRIBUTION}
+            url={MAP_CONFIG.TILE_LAYER_URL}
           />
           
           {/* Render All Rail Lines */}

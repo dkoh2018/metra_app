@@ -405,7 +405,29 @@ async function scrapeAndCacheCrowding(
            const isDestStop = cellId.toUpperCase().includes(scrapeDest.toUpperCase());
            
            const scheduledTime = strikeOut.textContent?.trim() || null;
-           const estimatedTime = (stopText?.textContent || '').replace(strikeOut.textContent || '', '').trim() || null;
+           
+           // Improved extraction using innerText to respect visual separation (newlines)
+           let estimatedTime: string | null = null;
+           if (stopText) {
+             const fullText = (stopText as HTMLElement).innerText || '';
+             const parts = fullText.split('\n').map(s => s.trim()).filter(s => s);
+             
+             // If we found multiple parts (e.g. "8:33 PM", "8:35 PM"), find the one that isn't the scheduled time
+             if (parts.length > 1 && scheduledTime) {
+               estimatedTime = parts.find(p => p !== scheduledTime) || null;
+             }
+             
+             // Fallback to text replacement if split didn't work (e.g. no newline)
+             if (!estimatedTime) {
+                estimatedTime = (stopText.textContent || '').replace(scheduledTime || '', '').trim() || null;
+             }
+           }
+
+           // Log the extraction result for debugging
+           if (isOriginStop || isDestStop) {
+             console.log(`[DEBUG_BROWSER] 🎯 Trip ${tripId}: Found StrikeOut. Sch='${scheduledTime}', Est='${estimatedTime}'`);
+             console.log(`[DEBUG_BROWSER]    Full Text: ${(stopText as HTMLElement)?.innerText?.replace(/\n/g, '|')}`);
+           }
            
            // DEBUG: Log if we found a delay
            if (isOriginStop || isDestStop) {

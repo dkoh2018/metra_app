@@ -3,7 +3,9 @@ import axios from 'axios';
 import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 import { getDatabase } from './schema.js';
 
-const METRA_API_URL = 'https://gtfspublic.metrarr.com/gtfs/public';
+import { METRA_API } from '@shared/config';
+
+const METRA_API_URL = METRA_API.GTFS_URL;
 
 /**
  * Get list of stops we care about for real-time updates

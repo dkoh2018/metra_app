@@ -4,7 +4,9 @@ import { getDatabase } from './schema.js';
 // Open-Meteo API URL
 // We use current_weather=true to get current conditions
 // temperature_unit=fahrenheit, windspeed_unit=mph
-const WEATHER_API_URL = 'https://api.open-meteo.com/v1/forecast';
+import { WEATHER_API } from '@shared/config';
+
+const WEATHER_API_URL = WEATHER_API.BASE_URL;
 
 interface WeatherConfig {
   name: string;

@@ -16,6 +16,8 @@ import { NextTrainCard } from '@/components/schedule/NextTrainCard';
 import { useScheduleData } from '@/hooks/useScheduleData';
 import { useActiveAlerts } from '@/hooks/useActiveAlerts';
 import { useWeather } from '@/hooks/useWeather';
+import { useNextTrain } from '@/hooks/useNextTrain';
+import { useScheduleLogger } from '@/hooks/useScheduleLogger';
 
 // Lazy load the map component since it's heavy
 const TrainMap = lazy(() => import('@/components/TrainMap'));
@@ -95,69 +97,14 @@ export default function Schedule() {
   // Find next train based on current view mode
   // Uses estimated departure time when available to prevent skipping delayed trains
   // Handles overnight trains correctly (24:XX format and 00:XX when viewing late at night)
-  const computedNextTrain = useMemo(() => {
-    const currentMinutes = getCurrentMinutesInChicago();
-    const currentSchedule = scheduleData[dayType];
-    if (!currentSchedule) return null;
-    const trains = direction === 'inbound' ? currentSchedule.inbound : currentSchedule.outbound;
-    
-    // DEBUG: Log current state
-    const currentTimeStr = `${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')}`;
-    console.debug(`[computedNextTrain] Current time: ${currentTimeStr} (${currentMinutes} min), dayType: ${dayType}, direction: ${direction}, trains: ${trains.length}`);
-    if (trains.length > 0) {
-      console.debug(`[computedNextTrain] First 5 trains:`, trains.slice(0, 5).map(t => `${t.departureTime} (${t.id})`));
-    }
-    
-    if (trains.length === 0) {
-      return null;
-    }
-    
-    // Find all upcoming trains with their minutes-until-departure
-    const upcomingTrains = trains.map(train => {
-      const estimate = estimatedTimes.get(train.id);
-      let trainMinutes: number;
-      
-      // If there's an estimated departure, use it
-      if (estimate?.predicted_departure) {
-        const match = estimate.predicted_departure.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-        if (match) {
-          let hours = parseInt(match[1], 10);
-          const mins = parseInt(match[2], 10);
-          const period = match[3].toUpperCase();
-          
-          if (period === 'PM' && hours !== 12) hours += 12;
-          if (period === 'AM' && hours === 12) hours = 0;
-          
-          trainMinutes = hours * 60 + mins;
-        } else {
-          trainMinutes = getTrainMinutesForComparison(train.departureTime, currentMinutes);
-        }
-      } else {
-        trainMinutes = getTrainMinutesForComparison(train.departureTime, currentMinutes);
-      }
-      
-      // Use centralized overnight utility for consistent handling
-      const minutesUntil = getMinutesUntilTrain(trainMinutes, currentMinutes);
-      
-      return { 
-        train, 
-        minutesUntil: minutesUntil !== null ? minutesUntil : Infinity 
-      };
-    });
-    
-    // Sort by minutes until departure and pick the closest upcoming train
-    upcomingTrains.sort((a, b) => a.minutesUntil - b.minutesUntil);
-    
-    // Find first train with valid (non-Infinity) minutes until
-    // Exclude SENTINEL_END which is a placeholder, not a real train
-    const next = upcomingTrains.find(t => 
-      t.train.id !== 'SENTINEL_END' && 
-      t.minutesUntil !== Infinity && 
-      t.minutesUntil > 0
-    );
-    
-    return next?.train || trains[0] || null;
-  }, [dayType, direction, scheduleData, estimatedTimes, currentMinutes]);
+  // Use extracted hook for next train calculation
+  const computedNextTrain = useNextTrain({
+    scheduleData,
+    dayType,
+    direction,
+    estimatedTimes,
+    currentMinutes
+  });
   
   useEffect(() => {
     if (nextTrain?.id !== computedNextTrain?.id) {
@@ -186,75 +133,19 @@ export default function Schedule() {
       : scheduleData[dayType].outbound;
   }, [direction, dayType, scheduleData]);
 
-  // DEBUG: Log complete train schedule with crowding/delay data
-  useEffect(() => {
-    // 1. Log Next Train Info (Detailed)
-    if (nextTrain) {
-      const tripId = tripIdMap.get(nextTrain.id);
-      const crowding = tripId ? (crowdingData.get(tripId) || crowdingData.get(nextTrain.id)) : crowdingData.get(nextTrain.id);
-      const delay = tripId ? (delays.get(tripId) || 0) : 0;
-      const duration = calculateDuration(nextTrain.departureTime, nextTrain.arrivalTime);
-      
-      // Generate Tracker URL (same logic as NextTrainCard)
-      const now = new Date();
-      const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
-      const origin = direction === 'inbound' ? selectedGtfsId : (selectedStation.terminal || 'OTC');
-      const dest = direction === 'inbound' ? (selectedStation.terminal || 'OTC') : selectedGtfsId;
-      const line = selectedStation.line || 'UP-NW';
-      
-      const trackerUrl = getMetraScheduleUrl({
-        origin,
-        destination: dest,
-        line,
-        date: thirtyMinAgo
-      });
-      
-      // Get weather for debug
-      const locationName = direction === 'inbound' ? 'Chicago' : selectedStation.name;
-      const weather = getWeatherForLocation(locationName);
-
-      console.log(`\n🚆 [NEXT TRAIN DEBUG] Current Next Train: #${nextTrain.id}`);
-      console.log(`   Depart: ${nextTrain.departureTime} (Scheduled)`);
-      console.log(`   Arrive: ${nextTrain.arrivalTime} (Scheduled)`);
-      console.log(`   Duration: ${duration}m`);
-      console.log(`   Crowding: ${crowding ? `🟠 ${crowding}` : '⚪ none/unknown'}`);
-      console.log(`   Delay: ${delay > 0 ? `⚠️ ${Math.round(delay/60)} min` : '✅ on time'}`);
-      console.log(`   Weather (${locationName}): ${weather ? `${Math.round(weather.temp_f)}°F` : 'Loading/Unavailable'}`);
-      console.log(`   Trip ID: ${tripId || 'N/A'}`);
-      console.log(`   Tracker URL: ${trackerUrl}`);
-      console.log(`   Is Express: ${nextTrain.isExpress}`);
-      console.log(``);
-    }
-
-    // 2. Log Full Schedule Table
-    if (currentTrains.length > 0) {
-      console.log(`📋 [TRAIN SCHEDULE DEBUG] Schedule for ${selectedStation.name} ${direction} (First 10):`);
-      
-      currentTrains.slice(0, 10).forEach((train) => {
-        // Use _tripId if available (from transformTrain), otherwise check map
-        const storedTripId = (train as any)._tripId; 
-        const mappedTripId = tripIdMap.get(train.id);
-        const activeTripId = storedTripId || mappedTripId;
-
-        const crowding = activeTripId ? (crowdingData.get(activeTripId) || crowdingData.get(train.id)) : crowdingData.get(train.id);
-        const estimated = estimatedTimes.get(train.id); // keyed by train ID usually
-        const delay = activeTripId ? (delays.get(activeTripId) || 0) : 0;
-        const duration = calculateDuration(train.departureTime, train.arrivalTime);
-        
-        console.log(`   Train ${train.id}:`);
-        console.log(`     Depart: ${train.departureTime}${estimated?.predicted_departure ? ` → ${estimated.predicted_departure} (DELAYED)` : ''}`);
-        console.log(`     Arrive: ${train.arrivalTime}${estimated?.predicted_arrival ? ` → ${estimated.predicted_arrival} (DELAYED)` : ''}`);
-        console.log(`     Duration: ${duration}m`);
-        console.log(`     Crowding: ${crowding ? `🟠 ${crowding}` : '⚪ none'}`);
-        console.log(`     Delay: ${delay > 0 ? `⚠️ ${Math.round(delay/60)} min` : '✅ on time'}`);
-        console.log(`     Trip ID: ${activeTripId || 'N/A'}`);
-        console.log(``);
-      });
-      console.log(`   Legend: 🟠 = has crowding data | ⚪ = no crowding | ⚠️ = delayed | ✅ = on time\n`);
-    } else {
-        console.log(`⚠️ [TRAIN SCHEDULE DEBUG] No trains found for ${dayType} ${direction}`);
-    }
-  }, [currentTrains, nextTrain, crowdingData, estimatedTimes, delays, selectedStation, direction, tripIdMap, selectedGtfsId]);
+  // Use extracted hook for debug logging
+  useScheduleLogger({
+    nextTrain,
+    currentTrains,
+    crowdingData,
+    delays,
+    estimatedTimes,
+    tripIdMap,
+    selectedStation,
+    direction,
+    selectedGtfsId,
+    dayType
+  });
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-white">
@@ -264,6 +155,13 @@ export default function Schedule() {
           alerts={activeAlerts} 
           onDismiss={(id: string) => setDismissedAlerts(prev => new Set(prev).add(id))} 
         />
+
+        {/* Station-specific Theme Banner */}
+        {selectedStation.theme?.bannerMessage && (
+          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm font-medium flex items-center justify-center text-center shadow-sm">
+            {selectedStation.theme.bannerMessage}
+          </div>
+        )}
 
         {/* Schedule Loading/Error State */}
         {scheduleLoading && (

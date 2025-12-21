@@ -32,7 +32,14 @@ export const STATIONS: Record<string, Station> = {
   nationalStreet: { lat: 42.0288783, lng: -88.2798941, name: 'National Street', gtfsId: 'NATIONALS', line: 'MD-W', terminal: 'CUS' },
   bartlett: { lat: 41.9920463, lng: -88.1823563, name: 'Bartlett', gtfsId: 'BARTLETT', line: 'MD-W', terminal: 'CUS' },
   hanoverPark: { lat: 41.9881015, lng: -88.1490052, name: 'Hanover Park', gtfsId: 'HANOVERP', line: 'MD-W', terminal: 'CUS' },
-  schaumburg: { lat: 41.9892520, lng: -88.1180587, name: 'Schaumburg', isHighlight: true, gtfsId: 'SCHAUM', line: 'MD-W', terminal: 'CUS' },
+  schaumburg: { 
+    lat: 41.9892520, lng: -88.1180587, 
+    name: 'Schaumburg', isHighlight: true, gtfsId: 'SCHAUM', 
+    line: 'MD-W', terminal: 'CUS',
+    theme: {
+        bannerMessage: "🚧 Platform repairs in progress - Please board from the east end."
+    }
+  },
   roselle: { lat: 41.9814724, lng: -88.0670396, name: 'Roselle', gtfsId: 'ROSELLE', line: 'MD-W', terminal: 'CUS' },
   medinah: { lat: 41.9780996, lng: -88.0501419, name: 'Medinah', gtfsId: 'MEDINAH', line: 'MD-W', terminal: 'CUS' },
   itasca: { lat: 41.9716674, lng: -88.0146190, name: 'Itasca', gtfsId: 'ITASCA', line: 'MD-W', terminal: 'CUS' },
