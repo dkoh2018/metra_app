@@ -2,7 +2,8 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import fs from "fs";
-import { Browser, ChromeReleaseChannel, computeExecutablePath, install, resolveBuildId } from "@puppeteer/browsers";
+import { Browser as BrowserEnum, ChromeReleaseChannel, computeExecutablePath, install, resolveBuildId } from "@puppeteer/browsers";
+import type { Browser } from "puppeteer";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
@@ -36,6 +37,93 @@ let getDatabase: any;
 
 // Track ongoing scraping operations to prevent concurrent scrapes
 const scrapingLocks = new Map<string, Promise<any>>();
+
+// ============================================
+// CONCURRENCY CONTROL
+// ============================================
+const MAX_CONCURRENT_SCRAPES = 3; // Limit parallel tabs to save memory
+class RequestQueue {
+  private queue: Array<() => void> = [];
+  private activeCount = 0;
+
+  async acquire(): Promise<void> {
+    if (this.activeCount < MAX_CONCURRENT_SCRAPES) {
+      this.activeCount++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    this.activeCount--;
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) {
+        this.activeCount++;
+        next();
+      }
+    }
+  }
+}
+const globalScrapeQueue = new RequestQueue();
+
+// ============================================
+// SHARED BROWSER INSTANCE (Singleton)
+// ============================================
+let sharedBrowser: Browser | null = null;
+let browserClosingPromise: Promise<void> | null = null;
+
+async function getSharedBrowser(): Promise<Browser> {
+  // If closing, wait for it to finish
+  if (browserClosingPromise) {
+    await browserClosingPromise;
+  }
+
+  // If valid instance exists, reuse it
+  if (sharedBrowser && !sharedBrowser.connected) {
+    console.warn("⚠️ [BROWSER] Found disconnected browser handle, discarding...");
+    sharedBrowser = null;
+  }
+
+  if (sharedBrowser) {
+    return sharedBrowser;
+  }
+
+  console.log("🚀 [BROWSER] Launching NEW Shared Browser instance...");
+  
+  const puppeteer = (await import("puppeteer")).default;
+  const executablePath = await ensureChromeExecutable();
+  
+  if (!executablePath) {
+    throw new Error("Chrome executable not found cannot launch browser");
+  }
+
+  sharedBrowser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage', // Critical for Docker/Railway
+      '--disable-gpu',
+      '--no-zygote',             // Spawns fewer processes
+      '--single-process',         // (Optional) forces single process, good for very low memory but less stable
+      '--disable-blink-features=AutomationControlled'
+    ],
+    executablePath,
+    timeout: 30000,
+    env: { ...process.env, TZ: 'America/Chicago' }
+  }) as unknown as Browser;
+
+  // Cleanup handler if browser crashes or disconnects unexpectedly
+  sharedBrowser.on('disconnected', () => {
+    console.log("🔌 [BROWSER] Shared browser disconnected/closed!");
+    sharedBrowser = null;
+  });
+
+  return sharedBrowser;
+}
 
 // ============================================
 // SCRAPE STATISTICS (for debugging Railway issues)
@@ -182,7 +270,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
     try {
       let buildId: string;
       try {
-        buildId = await resolveBuildId(Browser.CHROME, ChromeReleaseChannel.STABLE);
+        buildId = await resolveBuildId(BrowserEnum.CHROME, ChromeReleaseChannel.STABLE);
         console.log(`Resolved Chrome build ID: ${buildId}`);
       } catch (idError: any) {
         // Suppress known "Cannot read properties of undefined (reading 'match')" error from Puppeteer
@@ -196,7 +284,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
       }
 
       const executablePath = computeExecutablePath({
-        browser: Browser.CHROME,
+        browser: BrowserEnum.CHROME,
         buildId,
         cacheDir
       });
@@ -204,7 +292,7 @@ async function ensureChromeExecutable(): Promise<string | null> {
       if (!fs.existsSync(executablePath)) {
         console.log(`Downloading Chrome (${buildId}) to ${cacheDir}...`);
         await install({
-          browser: Browser.CHROME,
+          browser: BrowserEnum.CHROME,
           buildId,
           cacheDir,
           unpack: true
@@ -251,14 +339,15 @@ async function scrapeAndCacheCrowding(
   }
 
   const scrapePromise = (async () => {
-    let scrapeBrowser: any = null;
+    let page: any = null;
+    let browser: Browser | null = null;
+    
+    // Acquire concurrency slot
+    await globalScrapeQueue.acquire();
+    
     try {
-      const puppeteer = (await import("puppeteer")).default;
-      const executablePath = await ensureChromeExecutable();
-      
-      if (!executablePath) {
-        throw new Error("Chrome not available - crowding scraping disabled");
-      }
+      // Get the SHARED browser (lazy loads if needed)
+      browser = await getSharedBrowser();
       
       let scheduleDate: number;
 
@@ -328,20 +417,8 @@ async function scrapeAndCacheCrowding(
         date: scheduleDate * 1000 
       });
       
-      scrapeBrowser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled' // Extra stealth
-        ],
-        executablePath,
-        timeout: 30000,
-        env: { ...process.env, TZ: 'America/Chicago' }
-      });
-      
-      const page = await scrapeBrowser.newPage();
+      // Open a TAB (Page), not a new Browser
+      page = await browser.newPage();
       
       // Force Chicago timezone for the page context
       await page.emulateTimezone('America/Chicago');
@@ -555,7 +632,9 @@ async function scrapeAndCacheCrowding(
       console.log(`✅ [SCRAPE] SUCCESS: ${origin}->${destination} (${extractedData.crowding.length} trains)`);
       console.log(`📊 [STATS] Success Rate: ${scrapeStats.successRate}% (${scrapeStats.successCount}/${scrapeStats.totalAttempts})`);
       
-      await scrapeBrowser.close();
+      // Only close the PAGE, not the browser
+      await page.close();
+      page = null;
       
       return { 
         crowding: extractedData.crowding.map((item: any) => ({
@@ -569,9 +648,22 @@ async function scrapeAndCacheCrowding(
       };
 
     } catch (error: any) {
-      if (scrapeBrowser) await scrapeBrowser.close().catch(() => {});
+      if (page) await page.close().catch(() => {});
       console.error(`[${source}] Scraping failed:`, error.message);
+      
+      // If the browser crashed/disconnected, force a reset
+      if (error.message.includes("Session closed") || error.message.includes("Target closed") || error.message.includes("Protocol error")) {
+         console.warn("⚠️ [BROWSER] Browser appears to have crashed. Resetting instance.");
+         if (sharedBrowser) {
+           sharedBrowser.close().catch(() => {});
+           sharedBrowser = null;
+         }
+      }
+      
       throw error;
+    } finally {
+       // ALWAYS RELEASE THE SLOT
+       globalScrapeQueue.release();
     }
   })();
 
