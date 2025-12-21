@@ -401,7 +401,7 @@ export function NextTrainCard({
             <span className="text-zinc-300 shrink-0">·</span>
             <div className="shrink-0">
               <WeatherWidget 
-                location={direction === 'inbound' ? 'Chicago' : selectedStation.name} 
+                location={direction === 'inbound' ? selectedStation.name : 'Chicago'} 
               />
             </div>
           </div>

@@ -59,7 +59,7 @@ const POSITIONS_CACHE_TTL = 15 * 1000; // 15 seconds (positions come from free G
 
 // Crowding cache: 1 hour active, 4 hours off
 function getCrowdingCacheTTL(): number {
-  return isActiveHours() ? 60 * 60 * 1000 : 4 * 60 * 60 * 1000; // 1hr or 4hr
+  return isActiveHours() ? 10 * 60 * 1000 : 60 * 60 * 1000; // 10min active, 1hr off-hours
 }
 
 // Weather intervals: 15 min active, 30 min off  
