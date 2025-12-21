@@ -36,8 +36,7 @@ export function getMetraScheduleUrl({
   // - dest: Destination Station ID (GTFS ID)
   // - time: Unix timestamp for the desired schedule time
   // - allstops: 0 (default view), 1 (show all stops)
-  // redirect: seems to prefer the current time of request (not the scheduled time)
-  const redirectTimestamp = Math.floor(Date.now() / 1000);
-  
-  return `https://www.metra.com/schedules?line=${lineId}&orig=${orig}&dest=${dest}&time=${timestamp}&allstops=0&redirect=${redirectTimestamp}`;
+  // Note: Removed 'redirect' parameter that was using current time and potentially
+  // overriding our 4 AM schedule request. We want the full day's schedule.
+  return `https://www.metra.com/schedules?line=${lineId}&orig=${orig}&dest=${dest}&time=${timestamp}&allstops=0`;
 }
