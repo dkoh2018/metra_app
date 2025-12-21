@@ -25,6 +25,8 @@ const LOCATIONS: WeatherConfig[] = [
 ];
 
 export async function updateWeatherData(): Promise<void> {
+  const startTime = Date.now();
+  console.log(`[WEATHER] 🌦️ Starting update at ${new Date().toISOString()}`);
   const db = getDatabase();
   
   try {
@@ -91,13 +93,16 @@ export async function updateWeatherData(): Promise<void> {
           });
         }
       } catch (err: any) {
-        console.error(`Failed to fetch weather for ${loc.name}:`, err.message);
+        console.error(`❌ [WEATHER] Failed to fetch for ${loc.name}:`, err.message);
       }
     }
     
     if (pendingUpdates.length > 0) {
       transaction(pendingUpdates);
-      console.log(`✅ Weather data updated for ${pendingUpdates.length} locations`);
+      const duration = Date.now() - startTime;
+      console.log(`✅ [WEATHER] Data updated for ${pendingUpdates.length} locations in ${duration}ms`);
+    } else {
+      console.warn("⚠️ [WEATHER] No locations updated!");
     }
 
   } catch (error: any) {
