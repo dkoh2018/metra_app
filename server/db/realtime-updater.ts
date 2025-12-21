@@ -15,7 +15,7 @@ const METRA_API_URL = METRA_API.GTFS_URL;
 function getMonitoredStops(): string[] {
   // Highlighted stations (stations with isHighlight: true)
   // IMPORTANT: Keep this in sync with STATIONS in client/src/lib/stations.ts
-  const highlightedStations = ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT'];
+  const highlightedStations = ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT', 'LOMBARD'];
   
   // Terminals for each line
   const terminals = ['OTC', 'CUS'];

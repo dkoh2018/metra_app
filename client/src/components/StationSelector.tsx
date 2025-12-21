@@ -19,7 +19,7 @@ export function StationSelector({ selectedGtfsId, onStationChange, className }: 
   // Filter out OTC and temporarily restrict to Palatine as per user request
   // TODO: Remove the specific 'PALATINE' check when ready to enable full selector
   const suburbanStations = Object.values(STATIONS)
-    .filter(s => s.gtfsId && ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT'].includes(s.gtfsId))
+    .filter(s => s.gtfsId && ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT', 'LOMBARD'].includes(s.gtfsId))
     .sort((a, b) => {
       // Keep Palatine at top if desired, or just alphabetical.
       // Given "vertical fix", I'll keep them alphabetical for now unless specified.

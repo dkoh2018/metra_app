@@ -18,12 +18,18 @@ const serviceIdCache = new Map<string, string[]>();
  * Get current date in YYYYMMDD format for Chicago
  */
 function getCurrentDateString(): string {
+  // TODO: Revert this hardcoded date after testing or when 2024 data is available
+  // Hardcoding to Jan 4, 2025 (Saturday) to verify UP-W data which starts Jan 1, 2025
+  return '20250104';
+  
+  /*
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   }).format(new Date()).replace(/-/g, '');
+  */
 }
 
 /**

@@ -426,7 +426,7 @@ async function scrapeAndCacheCrowding(
            const cellId = cell.getAttribute('id');
            if (!cellId) return;
            
-           const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W|UP-N|BNSF)_[A-Z0-9]+_V\d+_[A-Z])/);
+           const tripIdMatch = cellId.match(/^((?:UP-NW|MD-W|UP-N|BNSF|UP-W)_[A-Z0-9]+_V\d+_[A-Z])/);
            if (!tripIdMatch) return;
            const tripId = tripIdMatch[1];
            
@@ -971,7 +971,7 @@ async function startServer() {
     app.get("/api/positions/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF', 'UP-W'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }
@@ -1083,7 +1083,7 @@ async function startServer() {
     app.get("/api/shapes/:lineId", async (req, res) => {
       try {
         const { lineId } = req.params;
-        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF'];
+        const validLines = ['UP-NW', 'MD-W', 'UP-N', 'BNSF', 'UP-W'];
         if (!validLines.includes(lineId)) {
           return res.status(400).json({ error: "Invalid line ID" });
         }

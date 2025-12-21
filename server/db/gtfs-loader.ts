@@ -77,9 +77,9 @@ export async function loadGTFSIntoDatabase(): Promise<void> {
     
     // Load trips
     const trips = parseCSV(path.join(GTFS_DIR, 'trips.txt')) as unknown as Trip[];
-    // Filter for UP-NW, MD-W, UP-N, and BNSF routes
-    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W' || t.route_id === 'UP-N' || t.route_id === 'BNSF');
-    console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W + UP-N + BNSF)`);
+    // Filter for UP-NW, MD-W, UP-N, BNSF, and UP-W routes
+    const tripsByRoute = trips.filter(t => t.route_id === 'UP-NW' || t.route_id === 'MD-W' || t.route_id === 'UP-N' || t.route_id === 'BNSF' || t.route_id === 'UP-W');
+    console.log(`Found ${tripsByRoute.length} trips (UP-NW + MD-W + UP-N + BNSF + UP-W)`);
     
     // Load calendar
     const calendars = parseCSV(path.join(GTFS_DIR, 'calendar.txt')) as unknown as Calendar[];

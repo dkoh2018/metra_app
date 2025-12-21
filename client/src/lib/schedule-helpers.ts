@@ -4,9 +4,9 @@ import { parseTimeToMinutes } from './time-utils';
 import { Train } from './scheduleData';
 
 // Cache compiled regex patterns for better performance
-// Supports UP-NW (UNW), UP-N (UN), MD-W (MW), and BNSF (BN) IDs
+// Supports UP-NW (UNW), UP-N (UN), MD-W (MW), BNSF (BN), and UP-W (UW) IDs
 // Made case-insensitive to be safe
-export const TRIP_ID_REGEX = /(?:UNW|UN|MW|BN)(\d+)/i;
+export const TRIP_ID_REGEX = /(?:UNW|UN|MW|BN|UW)(\d+)/i;
 export const TIME_PATTERN_REGEX = /(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/gi;
 export const MINUTES_PATTERN_REGEX = /(\d+)\s*min/;
 
@@ -37,10 +37,15 @@ export function transformTrain(apiTrain: ApiTrain, tripIdMap: Map<string, string
   } else {
     // Fallback: split by _ and try to find the part with digits
     const parts = apiTrain.trip_id.split('_');
-    // Updated to include BN (BNSF)
-    const numberPart = parts.find(p => /\d+/.test(p) && (p.toUpperCase().includes('UNW') || p.toUpperCase().includes('MW') || p.toUpperCase().includes('UN') || p.toUpperCase().includes('BN')));
+    // Updated to include BN (BNSF) and UW (UP-W)
+    const numberPart = parts.find(p => /\d+/.test(p) && (p.toUpperCase().includes('UNW') || p.toUpperCase().includes('MW') || p.toUpperCase().includes('UN') || p.toUpperCase().includes('BN') || p.toUpperCase().includes('UW')));
     if (numberPart) {
-      trainId = numberPart.toUpperCase().replace('UNW', '').replace('MW', '').replace('UN', '').replace('BN', '');
+      trainId = numberPart.toUpperCase()
+        .replace('UNW', '')
+        .replace('MW', '')
+        .replace('UN', '')
+        .replace('BN', '')
+        .replace('UW', '');
     }
   }
 
