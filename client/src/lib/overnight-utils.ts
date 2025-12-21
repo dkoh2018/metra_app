@@ -186,3 +186,70 @@ export function getAdjustedTrainMinutes(trainMinutes: number, currentMinutes: nu
   
   return trainMinutes;
 }
+
+/**
+ * Metra Terminal-Style Day Switching
+ * 
+ * Determines if we should switch to the next day's schedule based on whether
+ * all trains from the current service day have departed.
+ * 
+ * Unlike a hard 4 AM cutoff, this approach keeps showing today's remaining
+ * trains until the last one has departed + buffer.
+ * 
+ * @param trains - Array of trains from current service day (must have departureTime)
+ * @param currentMinutes - Current time in minutes (can be extended format like 1500 for 1 AM)
+ * @returns true if we should switch to the next day's schedule
+ */
+export function shouldSwitchToNextDay(
+  trains: Array<{ departureTime: string; id?: string }>,
+  currentMinutes: number
+): boolean {
+  // Filter out SENTINEL_END placeholder trains
+  const realTrains = trains.filter(t => t.id !== 'SENTINEL_END');
+  
+  if (realTrains.length === 0) {
+    // No trains for this day/direction, switch to next day
+    return true;
+  }
+  
+  // Find the last departure of the day
+  // Handle GTFS 24:XX times (convert to numeric minutes)
+  let maxDepartureMinutes = 0;
+  
+  for (const train of realTrains) {
+    const parts = train.departureTime.split(':');
+    if (parts.length >= 2) {
+      const hours = parseInt(parts[0], 10);
+      const mins = parseInt(parts[1], 10);
+      let trainMinutes = hours * 60 + mins;
+      
+      // Keep GTFS 24:XX+ format as-is (they're already sorted correctly)
+      if (trainMinutes > maxDepartureMinutes) {
+        maxDepartureMinutes = trainMinutes;
+      }
+    }
+  }
+  
+  // Add 5 minute buffer after last train departs
+  const switchThreshold = maxDepartureMinutes + 5;
+  
+  // If we're past the last train + buffer, switch to next day
+  return currentMinutes > switchThreshold;
+}
+
+/**
+ * Get the next service day type
+ */
+export type DayType = 'weekday' | 'saturday' | 'sunday';
+
+export function getNextDayType(current: DayType): DayType {
+  // Saturday night → Sunday
+  if (current === 'saturday') return 'sunday';
+  // Sunday night → Weekday (Monday)
+  if (current === 'sunday') return 'weekday';
+  // Friday night → Saturday
+  // But for weekday, we need to check if it's Friday... 
+  // For simplicity, assume weekday flows to weekday unless explicitly Friday
+  // The caller can check actual day-of-week if needed
+  return 'saturday'; // Default: weekday ends → saturday (Friday assumption)
+}

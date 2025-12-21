@@ -4,6 +4,7 @@ import { Station } from '@/lib/stations';
 import { ApiSchedule, ApiAlerts, CrowdingLevel, Direction, DayType, ApiTrain } from '@/types/schedule';
 import { transformTrain, TRIP_ID_REGEX, extractTrainIdFromTripId } from '@/lib/schedule-helpers';
 import { getChicagoTime, getServiceDayType, getCurrentMinutesInChicago } from '@/lib/time';
+import { shouldSwitchToNextDay, getNextDayType } from '@/lib/overnight-utils';
 import { Train } from '@/lib/scheduleData';
 
 type ScheduleDataState = {
@@ -54,30 +55,45 @@ export function useScheduleData(
     setDayType(serviceDayType);
   }, []);
 
-  // Update current time every 15 seconds
+  // Update current time every 15 seconds and check if day should switch
   useEffect(() => {
     const timer = setInterval(() => {
       const now = getChicagoTime();
       setCurrentTime(now);
       
-      const chicagoTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-    
-      // Check if we are in the "Late Night" window (00:00 - 03:00)
-      // If so, subtract 3 hours to push us back to the "previous day"
-      if (chicagoTime.getHours() < 3) {
-        chicagoTime.setHours(chicagoTime.getHours() - 3);
-      }
-
-      const day = chicagoTime.getDay();
-      let type: DayType = 'weekday';
-      if (day === 0) type = 'sunday'; // Sunday
-      else if (day === 6) type = 'saturday'; // Saturday
-      else type = 'weekday';
+      // Get the base service day type from 4 AM cutoff
+      const baseServiceDay = getServiceDayType(now);
       
-      setDayType(type);
+      // If we have schedule data loaded, use Metra terminal-style switching:
+      // Only switch to next day after ALL trains from current day have departed
+      if (Object.keys(scheduleData).length > 0) {
+        const currentDaySchedule = scheduleData[baseServiceDay];
+        if (currentDaySchedule) {
+          // Check both directions - we should switch only if BOTH are done
+          const inboundTrains = currentDaySchedule.inbound || [];
+          const outboundTrains = currentDaySchedule.outbound || [];
+          const allTrains = [...inboundTrains, ...outboundTrains];
+          
+          const currMins = getCurrentMinutesInChicago();
+          
+          if (shouldSwitchToNextDay(allTrains, currMins)) {
+            // All trains have departed, switch to next day
+            setDayType(getNextDayType(baseServiceDay));
+          } else {
+            // Still have trains running, keep current service day
+            setDayType(baseServiceDay);
+          }
+        } else {
+          // No data for this service day, use base
+          setDayType(baseServiceDay);
+        }
+      } else {
+        // No schedule data yet, use base 4 AM cutoff logic
+        setDayType(baseServiceDay);
+      }
     }, 15000);
     return () => clearInterval(timer);
-  }, []);
+  }, [scheduleData]); // Re-run when scheduleData changes
 
   // Memoize currentMinutes
   const currentMinutesKey = useMemo(() => {
