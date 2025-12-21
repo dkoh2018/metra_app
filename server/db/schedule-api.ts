@@ -18,18 +18,23 @@ const serviceIdCache = new Map<string, string[]>();
  * Get current date in YYYYMMDD format for Chicago
  */
 function getCurrentDateString(): string {
-  // TODO: Revert this hardcoded date after testing or when 2024 data is available
-  // Hardcoding to Jan 4, 2025 (Saturday) to verify UP-W data which starts Jan 1, 2025
-  return '20250104';
+  /* Smart Time Travel Logic */
+  const now = new Date();
   
-  /*
+  // If we are still in 2024, force the date to Jan 4, 2025
+  // This is required because the GTFS data has NO services for Dec 2024.
+  // We use Jan 4 (a date within the validity range) to allow valid Service ID lookup.
+  if (now.getFullYear() < 2025) {
+    return '20250104';
+  }
+
+  // Once we hit Jan 1, 2025, use the Real Date automatically.
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Chicago',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).format(new Date()).replace(/-/g, '');
-  */
+  }).format(now).replace(/-/g, '');
 }
 
 /**
