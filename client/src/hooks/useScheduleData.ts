@@ -347,12 +347,14 @@ export function useScheduleData(
       }>();
       
       crowdingArray.forEach((item: any) => {
+        // Use centralized helper for robust ID parsing (handles naked numbers)
+        const trainId = extractTrainIdFromTripId(item.trip_id);
+        
         if (item.crowding) {
           newCrowdingData.set(item.trip_id, item.crowding as CrowdingLevel);
           // Also map by train number for easier lookup
-          const trainMatch = item.trip_id.match(TRIP_ID_REGEX);
-          if (trainMatch) {
-            newCrowdingData.set(trainMatch[1], item.crowding as CrowdingLevel);
+          if (trainId !== "Unknown") {
+            newCrowdingData.set(trainId, item.crowding as CrowdingLevel);
           }
         }
         if (item.scheduled_departure || item.predicted_departure || item.scheduled_arrival || item.predicted_arrival) {
@@ -363,9 +365,8 @@ export function useScheduleData(
             predicted_arrival: item.predicted_arrival
           });
           // Also map by train number
-          const trainMatch = item.trip_id.match(TRIP_ID_REGEX);
-          if (trainMatch) {
-            newEstimatedTimes.set(trainMatch[1], {
+          if (trainId !== "Unknown") {
+            newEstimatedTimes.set(trainId, {
               scheduled_departure: item.scheduled_departure,
               predicted_departure: item.predicted_departure,
               scheduled_arrival: item.scheduled_arrival,
