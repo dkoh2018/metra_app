@@ -17,7 +17,6 @@ import { useScheduleData } from '@/hooks/useScheduleData';
 import { useActiveAlerts } from '@/hooks/useActiveAlerts';
 import { useWeather } from '@/hooks/useWeather';
 import { useNextTrain } from '@/hooks/useNextTrain';
-import { useScheduleLogger } from '@/hooks/useScheduleLogger';
 
 // Lazy load the map component since it's heavy
 const TrainMap = lazy(() => import('@/components/TrainMap'));
@@ -68,12 +67,6 @@ export default function Schedule() {
 
   // Derived State
   const selectedStation = Object.values(STATIONS).find(s => s.gtfsId === selectedGtfsId) || defaultStation;
-  
-  console.log('[Schedule] Render State:', { 
-    selectedGtfsId, 
-    line: selectedStation.line, 
-    terminal: selectedStation.terminal 
-  });
 
   const {
       currentMinutes,
@@ -132,20 +125,6 @@ export default function Schedule() {
       ? scheduleData[dayType].inbound 
       : scheduleData[dayType].outbound;
   }, [direction, dayType, scheduleData]);
-
-  // Use extracted hook for debug logging
-  useScheduleLogger({
-    nextTrain,
-    currentTrains,
-    crowdingData,
-    delays,
-    estimatedTimes,
-    tripIdMap,
-    selectedStation,
-    direction,
-    selectedGtfsId,
-    dayType
-  });
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary selection:text-white">

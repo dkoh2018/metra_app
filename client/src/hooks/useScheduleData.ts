@@ -98,7 +98,6 @@ export function useScheduleData(
     // Check for pre-injected data first (for instant page loads)
     const initialData = (window as any).__INITIAL_DATA__;
     if (initialData?.schedules?.[selectedGtfsId]) {
-      console.log('[useScheduleData] Using pre-injected schedule data for', selectedGtfsId);
       const data = initialData.schedules[selectedGtfsId];
       const newTripIdMap = new Map<string, string>();
       
@@ -139,7 +138,6 @@ export function useScheduleData(
       .then(res => {
         if (!res.ok) {
           if (res.status === 503) {
-            console.log('Database not available, using fallback schedule');
             return null;
           }
           throw new Error(`HTTP ${res.status}`);
@@ -336,7 +334,6 @@ export function useScheduleData(
     const initialData = (window as any).__INITIAL_DATA__;
     
     if (initialData?.crowding?.[cacheKey]) {
-      console.log('[useScheduleData] Using pre-injected crowding data for', cacheKey);
       const crowdingArray = initialData.crowding[cacheKey];
       const newCrowdingData = new Map<string, CrowdingLevel>();
       const newEstimatedTimes = new Map<string, {
@@ -421,8 +418,6 @@ export function useScheduleData(
       
       if (forceRefresh) params.append('force', 'true');
       
-      console.log(`🔄 [CROWDING FETCH] Request:`, { origin, dest, line: selectedStation.line, force: forceRefresh, retry: isRetry });
-      
       fetch(`/api/crowding?${params.toString()}`)
         .then(res => {
            if (!res.ok) {
@@ -432,11 +427,6 @@ export function useScheduleData(
            return res.json();
         })
         .then((response: any) => {
-          console.log(`✅ [CROWDING FETCH] Response received:`, { 
-            dataLength: response.crowding?.length || 0, 
-            firstItems: response.crowding?.slice(0, 3) 
-          });
-          
           if (response.error) throw new Error(response.error);
           
           const data = response.crowding;
@@ -447,7 +437,6 @@ export function useScheduleData(
           if ((!Array.isArray(data) || data.length === 0) && !response.error) {
              if (retryCountRef.current < MAX_RETRIES) {
                const nextRetry = retryCountRef.current + 1;
-               console.log(`❄️ [CROWDING] Cold start detected (empty data). Smart Retrying in 5s (Attempt ${nextRetry}/${MAX_RETRIES})...`);
                retryCountRef.current = nextRetry;
                
                // Reset fetching flag so the retry can pass
@@ -459,12 +448,12 @@ export function useScheduleData(
                }, 5000);
                return; 
              } else {
-               console.log(`❄️ [CROWDING] Max retries reached (${MAX_RETRIES}). Falling back to standard minute interval.`);
+               // Max retries reached, falling back to standard minute interval.
              }
           } else if (Array.isArray(data) && data.length > 0) {
              // We got data! Reset retry counter
              if (retryCountRef.current > 0) {
-                console.log(`✅ [CROWDING] Smart Retry successful after ${retryCountRef.current} attempts!`);
+                // Smart Retry successful
              }
              retryCountRef.current = 0;
           }
@@ -487,7 +476,7 @@ export function useScheduleData(
                 } else {
                    // Debug success for BNSF/MD-W
                    if (item.trip_id.includes('BN') || item.trip_id.includes('MW')) {
-                      console.log(`✅ [CROWDING MAPPING] Mapped ${item.trip_id} -> ${trainId}`);
+                      // Mapped trip_id to trainId
                    }
                 }
              
@@ -513,11 +502,6 @@ export function useScheduleData(
           setCrowdingData(() => {
               // REPLACE instead of merge to avoid stale direction data
               const next = newCrowdingMap;
-              
-              console.log(`📋 [CROWDING FETCH] Updated crowding map:`, {
-                totalEntries: next.size,
-                sample: Array.from(next.entries()).slice(0, 5)
-              });
               
               // Save to localStorage with direction key
               try {

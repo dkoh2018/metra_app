@@ -15,9 +15,7 @@ interface StationSelectorProps {
 }
 
 export function StationSelector({ selectedGtfsId, onStationChange, className }: StationSelectorProps) {
-  // Filter out OTC (Chicago) as it's the fixed destination, not a selectable origin for suburban commuters
-  // Filter out OTC and temporarily restrict to Palatine as per user request
-  // TODO: Remove the specific 'PALATINE' check when ready to enable full selector
+  // Filter to only show supported suburban stations (OTC is the fixed destination)
   const suburbanStations = Object.values(STATIONS)
     .filter(s => s.gtfsId && ['PALATINE', 'SCHAUM', 'WILMETTE', 'WESTMONT', 'LOMBARD'].includes(s.gtfsId))
     .sort((a, b) => {

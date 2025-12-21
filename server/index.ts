@@ -244,11 +244,9 @@ async function scrapeAndCacheCrowding(
 ) {
   const cacheKey = `${origin}_${destination}_${lineId}`;
   const startTime = Date.now();
-  console.log(`[${source}] Starting scraping for ${origin}->${destination} (Line: ${lineId})...`);
 
   // Check if a scrape is already in progress
   if (scrapingLocks.has(cacheKey)) {
-    console.log(`[${source}] Detailed scrape already in progress for ${cacheKey}, waiting for it...`);
     return scrapingLocks.get(cacheKey);
   }
 
@@ -318,8 +316,6 @@ async function scrapeAndCacheCrowding(
         // e.g. 4am CST = 10am UTC
         const targetDate = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 4 + offsetHours, 0, 0));
         
-        console.log(`[${source}] 📅 Requesting schedule for Service Day: ${dateStr} (Server: 4:00 AM + ${offsetHours}h offset)`);
-        
         scheduleDate = Math.floor(targetDate.getTime() / 1000);
       }
       
@@ -331,10 +327,6 @@ async function scrapeAndCacheCrowding(
         line: String(lineId),
         date: scheduleDate * 1000 
       });
-      console.log(`[${source}] Constructed URL: ${url}`);
-      
-      // Add a random delay before launching browser to avoid being too predictable
-      // if (runMode !== 'TESTING') await new Promise(r => setTimeout(r, Math.random() * 2000 + 1000));
       
       scrapeBrowser = await puppeteer.launch({
         headless: true,
@@ -403,8 +395,6 @@ async function scrapeAndCacheCrowding(
         throw new Error(`WAF blocked request (HTTP ${httpStatus})`);
       }
       
-      console.log(`[DEBUG_SCRAPE] Page loaded: "${pageTitle}" (HTTP ${httpStatus})`);
-      
       // TIMING DIAGNOSTICS: Track how long it takes for .trip-row to appear
       const selectorWaitStart = Date.now();
       let selectorFound = false;
@@ -435,18 +425,12 @@ async function scrapeAndCacheCrowding(
       
       // Extract data (Same logic as before)
       const extractedData = await page.evaluate((scrapeOrigin: string, scrapeDest: string, scheduleDate: number) => {
-        // DEBUG: Log Environment inside Browser
-        console.log(`[DEBUG_BROWSER] Browser Date: ${new Date().toString()}`);
-        console.log(`[DEBUG_BROWSER] Browser Timezone Offset: ${new Date().getTimezoneOffset()}`);
-        console.log(`[DEBUG_BROWSER] Target Schedule Date: ${new Date(scheduleDate * 1000).toString()}`);
-        
         type ClientCrowdingLevel = 'low' | 'some' | 'moderate' | 'high';
         
         const resultsMap = new Map<string, any>();
         
         // Crowding extraction
         const tripRows = Array.from(document.querySelectorAll('.trip-row'));
-        console.log(`[DEBUG_BROWSER] Found ${tripRows.length} .trip-row elements`);
         
         tripRows.forEach((tripCell: Element) => {
           const tripId = tripCell.getAttribute('id');
@@ -472,22 +456,10 @@ async function scrapeAndCacheCrowding(
         
         // Time/Delay extraction
         const stopCells = Array.from(document.querySelectorAll('td.stop'));
-        let debugLogCount = 0;
         
         stopCells.forEach((cell: Element) => {
            const stopText = cell.querySelector('.stop--text');
            const strikeOut = stopText?.querySelector('.strike-out');
-           
-           // DEBUG: Log first few cells html to verify structure
-           if (debugLogCount < 3) {
-             const cellId = cell.getAttribute('id') || 'no-id';
-             if (cellId.includes(scrapeOrigin) || cellId.includes(scrapeDest)) {
-               console.log(`[DEBUG_BROWSER] Checking cell ${cellId}:`);
-               console.log(`[DEBUG_BROWSER]   HTML: ${cell.innerHTML.substring(0, 200)}...`);
-               console.log(`[DEBUG_BROWSER]   StrikeOut Found: ${!!strikeOut}`);
-               debugLogCount++;
-             }
-           }
            
            if (!strikeOut) return; // No delay info
            
@@ -520,17 +492,6 @@ async function scrapeAndCacheCrowding(
              }
            }
 
-           // Log the extraction result for debugging
-           if (isOriginStop || isDestStop) {
-             console.log(`[DEBUG_BROWSER] 🎯 Trip ${tripId}: Found StrikeOut. Sch='${scheduledTime}', Est='${estimatedTime}'`);
-             console.log(`[DEBUG_BROWSER]    Full Text: ${(stopText as HTMLElement)?.innerText?.replace(/\n/g, '|')}`);
-           }
-           
-           // DEBUG: Log if we found a delay
-           if (isOriginStop || isDestStop) {
-             console.log(`[DEBUG_BROWSER] Found Delay Info for ${tripId}: Sch=${scheduledTime}, Est=${estimatedTime}`);
-           }
-           
            const existing = resultsMap.get(tripId);
            if (existing) {
              if (isOriginStop) {
@@ -543,9 +504,7 @@ async function scrapeAndCacheCrowding(
            }
         });
         
-        // Debug output size
         const results = Array.from(resultsMap.values());
-        console.log(`[DEBUG_BROWSER] Extracted ${results.length} total trips`);
         
         return { crowding: results };
       }, origin, destination, scheduleDate);
@@ -554,13 +513,6 @@ async function scrapeAndCacheCrowding(
         console.error(`[${source}] ❌ Extraction failed - no crowding data returned`);
         throw new Error('No crowding data extracted');
       }
-      
-      console.log(`\n📊 [${source}] CROWDING DATA EXTRACTED:`);
-      console.log(`   Total trains found: ${extractedData.crowding.length}`);
-      console.log(`   Sample (first 3):`);
-      extractedData.crowding.slice(0, 3).forEach((item: any) => {
-        console.log(`   - ${item.trip_id}: crowding=${item.crowding}, dep=${item.scheduled_departure || 'N/A'}${item.estimated_departure ? ` (delayed to ${item.estimated_departure})` : ''}`);
-      });
 
       // Save to Database (UPSERT)
       const { getDatabase } = await import("./db/schema.js");
@@ -575,16 +527,13 @@ async function scrapeAndCacheCrowding(
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
            `);
            
-           let savedCount = 0;
            extractedData.crowding.forEach((item: any) => {
              insert.run(
                origin, destination, item.trip_id, item.crowding,
                item.scheduled_departure, item.estimated_departure,
                item.scheduled_arrival, item.estimated_arrival
              );
-             savedCount++;
            });
-           console.log(`[${source}] Saved/Updated ${savedCount} entries for ${origin}->${destination}`);
          });
          transaction();
       }
@@ -697,7 +646,6 @@ function scheduleDailyScrapes() {
     keyRoutes.forEach(route => {
       const key = `${route.origin}|${route.destination}|${route.line}`;
       if (!uniquePairs.has(key)) {
-        console.log(`⏰ [SCHEDULE] Adding priority route: ${route.origin}->${route.destination}`);
         uniquePairs.add(key);
         scrapeQueue.push(route);
       }
@@ -705,15 +653,11 @@ function scheduleDailyScrapes() {
 
     // Also add defaults if empty (cold start) - though keyRoutes handles this now
     if (scrapeQueue.length === 0) {
-      console.log("⏰ [SCHEDULE] No active routes found, adding defaults...");
       scrapeQueue.push({ origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' });
     }
     
-    console.log(`⏰ [SCHEDULE] Found ${scrapeQueue.length} routes to seed:`, scrapeQueue.map(q => `${q.origin}->${q.destination}`).join(', '));
-    
     // Process queue in parallel chunks to speed up seeding
     const CONCURRENCY = 3;
-    console.log(`⏰ [SCHEDULE] Processing ${scrapeQueue.length} routes with concurrency ${CONCURRENCY}...`);
     
     for (let i = 0; i < scrapeQueue.length; i += CONCURRENCY) {
       const chunk = scrapeQueue.slice(i, i + CONCURRENCY);
@@ -730,8 +674,6 @@ function scheduleDailyScrapes() {
         const chicagoDateStr = `${chiYear}-${String(chiMonth).padStart(2, '0')}-${String(chiDay).padStart(2, '0')}`;
         const targetDate = new Date(`${chicagoDateStr}T04:00:00-06:00`);
         
-        console.log(`[SCHEDULED] Scraping ${origin}->${destination} (${line}) for ${targetDate.toLocaleString('en-US', { timeZone: 'America/Chicago' })}...`);
-        
         try {
           await scrapeAndCacheCrowding(
             origin, 
@@ -740,7 +682,6 @@ function scheduleDailyScrapes() {
             'SCHEDULED', // Source
             targetDate   // Date override
           );
-          console.log(`[SCHEDULED] Completed scraping for ${origin}->${destination}`);
         } catch (error) {
           console.error(`[SCHEDULED] Failed daily scrape for ${origin}->${destination}:`, error);
         }
@@ -822,7 +763,7 @@ function scheduleFrequentDelayScrapes() {
     { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' }
   ];
 
-  const SCRAPE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+  const SCRAPE_INTERVAL_MS = 7 * 60 * 1000; // 7 minutes
   const CONCURRENCY = 2; // Process 2 routes at a time to avoid overwhelming
 
   const runDelayScrape = async () => {
@@ -868,7 +809,7 @@ function scheduleFrequentDelayScrapes() {
   const msSinceLastTen = now.getTime() % SCRAPE_INTERVAL_MS;
   const msToNextSync = SCRAPE_INTERVAL_MS - msSinceLastTen;
 
-  console.log(`⏱️ [DELAY SCRAPE] Will start in ${Math.round(msToNextSync / 1000 / 60)} min, then every 10 min during active hours (5AM-10PM)`);
+  console.log(`⏱️ [DELAY SCRAPE] Will start in ${Math.round(msToNextSync / 1000 / 60)} min, then every 7 min during active hours (5AM-10PM)`);
 
   setTimeout(() => {
     runDelayScrape();
@@ -917,33 +858,8 @@ async function startServer() {
           // Start the daily scheduled scrape task
           scheduleDailyScrapes();
           
-          // Start the 10-minute delay scrape task (active hours only)
+          // Start the 7-minute delay scrape task (active hours only)
           scheduleFrequentDelayScrapes();
-
-          // [TESTING] 4-Minute Interval for Crowding Data
-          console.log("🧪 [TESTING] Starting 4-minute CROWDING DATA interval for testing...");
-          const runTestScrape = async () => {
-             console.log("🧪 [TESTING] Triggering 4-minute scrape...");
-             const testRoutes = [
-               { origin: 'PALATINE', destination: 'OTC', line: 'UP-NW' },
-               { origin: 'OTC', destination: 'PALATINE', line: 'UP-NW' },
-               { origin: 'WESTMONT', destination: 'CUS', line: 'BNSF' },
-               { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' },
-               { origin: 'SCHAUM', destination: 'CUS', line: 'MD-W' },
-               { origin: 'CUS', destination: 'SCHAUM', line: 'MD-W' },
-               { origin: 'WILMETTE', destination: 'OTC', line: 'UP-N' },
-               { origin: 'OTC', destination: 'WILMETTE', line: 'UP-N' }
-             ];
-             
-             for (const route of testRoutes) {
-               try {
-                 await scrapeAndCacheCrowding(route.origin, route.destination, route.line, 'TESTING');
-               } catch (e) { console.error(`[TESTING] Failed scrape for ${route.origin}:`, e); }
-             }
-          };
-          // Run immediately then every 4 mins
-          runTestScrape(); 
-          setInterval(runTestScrape, 4 * 60 * 1000);
           
           if (shouldUpdateGTFS()) {
             console.log("Loading GTFS data into database...");
@@ -1129,8 +1045,6 @@ async function startServer() {
             data: allTrains,
             timestamp: now
           });
-          
-          console.log(`[POSITIONS] Bulk cached ${allTrains.length} trains across all lines`);
         }
         
         // Filter for requested line only
@@ -1438,15 +1352,6 @@ async function startServer() {
         const { getDatabase } = await import("./db/schema.js");
         db = getDatabase();
 
-        // Debug: Check if DB has the new columns
-        try {
-           // We don't select * to avoid performance hit, just check one new column
-           const check = db.prepare("SELECT predicted_departure FROM crowding_cache LIMIT 1").get();
-           console.log("[DB] Schema check passed: 'predicted_departure' column exists.");
-        } catch (e: any) {
-           console.error("[DB] 🚨 SCHEMA ERROR: crowding_cache table is missing new columns! Migration failed or didn't run.", e.message);
-        }
-
         const formatCachedData = (cachedData: Array<{
           trip_id: string;
           crowding: string | null;
@@ -1492,10 +1397,8 @@ async function startServer() {
           
           if (cachedData.length > 0) {
             const result = formatCachedData(cachedData);
-            // Append 'Z' to treat database timestamp (UTC) as UTC
             const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at + 'Z').getTime()) / 1000 / 60);
             console.log(`✅ [CROWDING API] Cache HIT - Returning ${result.crowding.length} trains (${cacheAge} min old)`);
-            console.log(`   First 3 trains: ${result.crowding.slice(0, 3).map((t: any) => `${t.trip_id}:${t.crowding}`).join(', ')}`);
             return clearTimeoutAndSend(result);
           }
           

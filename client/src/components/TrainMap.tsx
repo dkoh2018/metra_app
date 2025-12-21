@@ -429,7 +429,6 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
           }
         });
         
-        console.log('Loaded unified rail shapes:', Object.keys(newRailLines));
         setRailLines(newRailLines);
       })
       .catch(err => console.error('Error loading rail lines:', err));
@@ -550,15 +549,6 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const inboundCount = trains.filter(t => t.direction === 'inbound').length;
   const outboundCount = trains.filter(t => t.direction === 'outbound').length;
   const totalCount = inboundCount + outboundCount;
-  
-  // Debug logging
-  console.log('UnifiedTrainMap:', {
-    totalTrains: trains.length,
-    inboundCount,
-    outboundCount,
-    totalCount,
-    railLines: Object.keys(railLines),
-  });
 
   // Don't render until icons are ready
   if (!stationIcon || !terminalIcon) {

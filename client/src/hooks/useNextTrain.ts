@@ -25,10 +25,6 @@ export function useNextTrain({
     if (!currentSchedule) return null;
     const trains = direction === 'inbound' ? currentSchedule.inbound : currentSchedule.outbound;
     
-    // DEBUG: Log current state
-    const currentTimeStr = `${Math.floor(currentMinutes/60)}:${String(currentMinutes%60).padStart(2, '0')}`;
-    console.debug(`[computedNextTrain] Current time: ${currentTimeStr} (${currentMinutes} min), dayType: ${dayType}, direction: ${direction}, trains: ${trains.length}`);
-    
     if (trains.length === 0) {
       return null;
     }
