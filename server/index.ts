@@ -1347,6 +1347,13 @@ async function startServer() {
       const lineId = typeof line === 'string' ? line : 'UP-NW';
       const cacheKey = `${origin}_${destination}_${lineId}`;
       
+      // DEBUG: Track problem routes (Palatine inbound, Westmont inbound)
+      const isProblemRoute = (origin === 'PALATINE' && destination === 'OTC') || 
+                              (origin === 'WESTMONT' && destination === 'CUS');
+      if (isProblemRoute) {
+        console.log(`🔍 [DEBUG-ROUTE] Problem route request: ${origin}->${destination} (${lineId})`);
+      }
+      
       try {
         const forceRefresh = force === 'true' || force === '1';
         const { getDatabase } = await import("./db/schema.js");
@@ -1399,10 +1406,18 @@ async function startServer() {
             const result = formatCachedData(cachedData);
             const cacheAge = Math.round((Date.now() - new Date(cachedData[0].updated_at + 'Z').getTime()) / 1000 / 60);
             console.log(`✅ [CROWDING API] Cache HIT - Returning ${result.crowding.length} trains (${cacheAge} min old)`);
+            if (isProblemRoute) {
+              console.log(`🔍 [DEBUG-ROUTE] ${origin}->${destination} CACHE HIT: ${cachedData.length} raw, ${result.crowding.length} formatted`);
+            }
             return clearTimeoutAndSend(result);
           }
           
           console.log(`❌ [CROWDING API] Cache MISS - No fresh data (will scrape or use stale)`);
+          if (isProblemRoute) {
+            // Check total entries in DB for this route (including stale)
+            const totalInDb = db.prepare(`SELECT COUNT(*) as cnt FROM crowding_cache WHERE origin = ? AND destination = ?`).get(origin, destination) as { cnt: number };
+            console.log(`🔍 [DEBUG-ROUTE] ${origin}->${destination} CACHE MISS! Total DB entries: ${totalInDb.cnt}, TTL: ${cacheTTLMinutes} min`);
+          }
         }
         
         if (scrapingLocks.has(cacheKey)) {
