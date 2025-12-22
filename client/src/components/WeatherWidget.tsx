@@ -34,12 +34,10 @@ export function WeatherWidget({ location, className }: WeatherWidgetProps) {
         <span>{Math.round(weather.temp_f)}°</span>
       </div>
       
-      {weather.wind_speed_mph > 10 && (
-        <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5">
           <Wind className="w-2.5 h-2.5" />
           <span>{Math.round(weather.wind_speed_mph)}</span>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
