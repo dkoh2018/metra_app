@@ -4,6 +4,7 @@ import { RotateCcw } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { STATIONS } from '@/lib/stations';
+import { LINE_COLORS } from '@/lib/colors';
 import { Train, Station } from '@shared/types';
 import { MAP_CONFIG } from '@shared/config';
 import { SUPPORTED_LINES } from '@shared/constants';
@@ -102,11 +103,14 @@ function snapToTrack(
 }
 
 // Create a custom train icon with direction arrow attached to the circle
+// Create a custom train icon with direction arrow attached to the circle
 const createTrainIcon = (trainNumber: string, bearing?: number, direction?: string) => {
   const isInbound = direction === 'inbound';
+  
+  // Revert to Blue/Orange as requested, overriding line colors for the icon itself
   const primaryColor = isInbound ? '#3b82f6' : '#f59e0b';
-  const darkColor = isInbound ? '#1d4ed8' : '#d97706';
-  // Neon bright colors for the arrow
+  
+  // Neon bright colors for the arrow (Direction Indicator)
   const arrowColor = isInbound ? '#00d4ff' : '#ff6b00'; // Neon cyan / Neon orange
   
   // Bearing is the track direction (0 = North, 90 = East, etc.)
@@ -140,7 +144,7 @@ const createTrainIcon = (trainNumber: string, bearing?: number, direction?: stri
         height: ${circleRadius * 2}px;
         background: ${primaryColor};
         border-radius: 50%;
-        border: 2px solid white;
+        border: 2px solid ${primaryColor};
         box-shadow: 0 2px 6px rgba(0,0,0,0.4);
         display: flex;
         align-items: center;
@@ -344,6 +348,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<TripSchedule[]>([]);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [selectedCrowding, setSelectedCrowding] = useState<string | null>(null);
   
   // Ref to track popup container for scroll event handling
   const popupContainerRef = useRef<HTMLDivElement | null>(null);
@@ -359,18 +364,25 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
     setLoadingSchedule(true);
     setSelectedTripId(tripId);
     setSchedule([]); // Clear previous
+    setSelectedCrowding(null);
     
     try {
       const response = await fetch(`/api/trip-schedule/${tripId}`);
       if (!response.ok) throw new Error('Failed to fetch schedule');
       const data = await response.json();
       setSchedule(data.schedule || []);
+      setSelectedCrowding(data.crowding || null);
     } catch (err) {
       console.error('Error fetching trip schedule:', err);
     } finally {
       setLoadingSchedule(false);
     }
   };
+
+  // ... (fetchPositions and useEffects omitted for brevity)
+
+  // ...
+
 
   // Fetch train positions for ALL lines
   const fetchPositions = useCallback(async () => {
@@ -589,7 +601,7 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
               key={lineId}
               positions={points}
               pathOptions={{
-                color: '#6366f1', // Indigo color for ALL tracks (Uniform look)
+                color: LINE_COLORS[lineId] || LINE_COLORS['default'], // Custom Line Color
                 weight: 6,
                 opacity: 0.8,
               }}
@@ -659,13 +671,25 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                           {train.direction === 'inbound' ? '→ Inbound to Chicago' : '← Outbound'}
                         </div>
                       </div>
-                      {/* Live Pulse Indicator */}
-                      <div className="flex items-center gap-1.5 bg-green-50 px-2 py-1 rounded-full border border-green-100">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                        </span>
-                        <span className="text-[10px] font-bold text-green-700 uppercase tracking-wider">Live</span>
+                      
+                      {/* Live Pulse Indicator & Crowding Badge */}
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1.5 bg-green-50 px-2 py-1 rounded-full border border-green-100">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                          </span>
+                          <span className="text-[10px] font-bold text-green-700 uppercase tracking-wider">Live</span>
+                        </div>
+                        {selectedCrowding && selectedTripId === train.tripId && (
+                           <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                             selectedCrowding === 'LOW' ? 'bg-green-100 text-green-800 border-green-200' :
+                             selectedCrowding === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                             'bg-red-100 text-red-800 border-red-200'
+                           }`}>
+                             {selectedCrowding} Load
+                           </div>
+                        )}
                       </div>
                     </div>
 
@@ -738,17 +762,85 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
 
                             const stationName = getStationName(stop.stop_id);
                             
-                            // Simple time formatting
+                            // Robust time formatting
                             const formatTime = (timeStr: string) => {
                                 if (!timeStr) return '--:--';
-                                const [h, m] = timeStr.split(':').map(Number);
-                                const date = new Date();
-                                date.setHours(h, m);
-                                return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                                try {
+                                    // Handle ISO timestamps (from realtime_updates)
+                                    if (timeStr.includes('T')) {
+                                      const date = new Date(timeStr);
+                                      if (isNaN(date.getTime())) return timeStr;
+                                      return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                                    }
+
+                                    // Handle GTFS HH:MM:SS
+                                    const parts = timeStr.split(':');
+                                    if (parts.length < 2) return timeStr; 
+                                    
+                                    const h = parseInt(parts[0]);
+                                    const m = parseInt(parts[1]);
+                                    
+                                    if (isNaN(h) || isNaN(m)) return timeStr;
+                                    
+                                    const date = new Date();
+                                    date.setHours(h, m);
+                                    if (isNaN(date.getTime())) return timeStr;
+                                    
+                                    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                                } catch (e) {
+                                    return timeStr;
+                                }
                             };
 
                             // Highlight first item as "Next Stop"
                             const isNextStop = outputIndex === 0;
+                            
+                            // Calculate delay color class
+                            let timeColorClass = 'text-zinc-500'; // Default (Black/Grey)
+                            
+                            if (stop.predicted_arrival) {
+                               let predMins = 0;
+                               
+                               // Calculate Predicted Minutes
+                               if (stop.predicted_arrival.includes('T')) {
+                                 const d = new Date(stop.predicted_arrival);
+                                 if (!isNaN(d.getTime())) {
+                                   let h = d.getHours();
+                                   const m = d.getMinutes();
+                                   
+                                   // Adjust for overnight wrap if schedule is > 24h
+                                   const [sh] = stop.arrival_time.split(':').map(Number);
+                                   if (sh >= 24 && h < 4) {
+                                     h += 24;
+                                   }
+                                   predMins = h * 60 + m;
+                                 }
+                               } else {
+                                 const [ph, pm] = stop.predicted_arrival.split(':').map(Number);
+                                 predMins = ph * 60 + pm;
+                               }
+
+                               // Calculate Scheduled Minutes
+                               const sParts = stop.arrival_time.split(':');
+                               if (sParts.length >= 2 && predMins > 0) {
+                                   const [sh, sm] = sParts.map(Number);
+                                   const schedMins = sh * 60 + sm;
+                                   
+                                   const diff = predMins - schedMins;
+                                   
+                                   // Cap outlandish diffs (e.g. from bad date parsing)
+                                   if (!isNaN(diff) && Math.abs(diff) < 120) {
+                                       if (diff > 5) {
+                                         timeColorClass = 'text-red-600 font-bold';
+                                       } else if (diff > 1) {
+                                         timeColorClass = 'text-amber-600 font-bold';
+                                       } else if (diff < -1) {
+                                          timeColorClass = 'text-green-600 font-bold';
+                                       }
+                                       // Else: On Time (diff between -1 and 1) -> Default Color
+                                   }
+                               }
+                            }
                             
                             return (
                               <div key={`${stop.stop_id}-${outputIndex}`} className={`flex justify-between items-center py-0.5 px-2 rounded group ${isNextStop ? 'bg-blue-50 border-l-2 border-blue-500' : 'hover:bg-zinc-50'}`}>
@@ -756,8 +848,8 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
                                    <div className={`w-1.5 h-1.5 rounded-full ${isNextStop ? 'bg-blue-500 animate-pulse' : (stationEntry?.isTerminal || stationEntry?.isHighlight ? 'bg-zinc-800' : 'bg-zinc-300 group-hover:bg-zinc-400')}`}></div>
                                    <span className={`text-xs truncate ${isNextStop ? 'font-bold text-blue-900' : (stationEntry?.isHighlight ? 'font-bold text-zinc-800' : 'text-zinc-600')}`}>{stationName}</span>
                                 </div>
-                                <div className={`text-xs font-mono font-medium ${isNextStop ? 'text-blue-700' : 'text-zinc-500'}`}>
-                                  {formatTime(stop.arrival_time)}
+                                <div className={`text-xs font-mono font-medium ${timeColorClass}`}>
+                                  {formatTime(stop.predicted_arrival || stop.arrival_time)}
                                 </div>
                               </div>
                             );

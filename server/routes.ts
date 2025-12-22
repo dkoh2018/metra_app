@@ -354,8 +354,20 @@ export function registerRoutes(app: express.Express) {
           WHERE s.trip_id = ?
           ORDER BY s.stop_sequence ASC
         `).all(tripId);
+
+        // Fetch latest crowding info for this trip
+        const crowdingRecord = db.prepare(`
+          SELECT crowding 
+          FROM crowding_cache 
+          WHERE trip_id = ? 
+          ORDER BY updated_at DESC 
+          LIMIT 1
+        `).get(tripId) as { crowding: string } | undefined;
         
-        res.json({ schedule });
+        res.json({ 
+          schedule,
+          crowding: crowdingRecord?.crowding || null
+        });
       } catch (error: any) {
         console.error("Error fetching trip schedule:", error.message);
         res.status(500).json({ error: "Failed to fetch trip schedule" });
