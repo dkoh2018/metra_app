@@ -269,7 +269,8 @@ export async function resetSharedBrowser(): Promise<void> {
 
   sharedBrowser = null;
   
-  // Wait a moment for OS to clean up
-  await new Promise(r => setTimeout(r, 1000));
+  // Wait a few seconds for OS to reclaim network ports/memory
+  console.log("⏳ [BROWSER] Waiting for network connections to drain...");
+  await new Promise(r => setTimeout(r, 5000));
   console.log("✅ [BROWSER] Browser instance reset complete.");
 }

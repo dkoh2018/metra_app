@@ -52,6 +52,18 @@ const circuitBreaker = {
   }
 };
 
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0'
+];
+
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
 // Reusable scraping function for both API requests and scheduled background tasks
 export async function scrapeAndCacheCrowding(
   origin: string, 
@@ -165,7 +177,10 @@ export async function scrapeAndCacheCrowding(
       });
       
       await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      
+      const randomUA = getRandomUserAgent();
+      console.log(`[SCRAPE] 🎭 Using User Agent: ${randomUA.substring(0, 40)}...`);
+      await page.setUserAgent(randomUA);
       
       await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
@@ -187,10 +202,25 @@ export async function scrapeAndCacheCrowding(
         }
       });
       
+      // Optimize: Intercept and block unnecessary resources (images, fonts, css)
+      await page.setRequestInterception(true);
+      
+      page.on('request', (req: any) => {
+        const resourceType = req.resourceType();
+        // Block heavy visual resources that don't affect data structure
+        if (['image', 'stylesheet', 'font', 'media', 'other'].includes(resourceType)) {
+          req.abort();
+        } else {
+          // Allow: document, script, xhr, fetch
+          req.continue();
+        }
+      });
+
       // Navigate
       console.log(`[SCRAPE] 🌐 Navigating to Metra... (attempt #${scrapeStats.totalAttempts + 1})`);
       const navStartTime = Date.now();
-      await page.goto(url, { waitUntil: 'networkidle0', timeout: 20000 });
+      // Optimize: 'domcontentloaded' is much faster than 'networkidle0' and sufficient since we wait for selectors
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       const navEndTime = Date.now();
       
       // Check if page loaded correctly

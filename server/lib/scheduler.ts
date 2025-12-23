@@ -1,5 +1,6 @@
 import { getDatabase } from "../db/schema.js";
 import { scrapeAndCacheCrowding } from "./scraping.js";
+import { resetSharedBrowser } from "./browser.js";
 
 // Scheduled Task: Daily Crowding Seed (3:55 AM Chicago Time)
 // Runs once per day to fetch FULL DAY crowding predictions for all active routes
@@ -102,6 +103,9 @@ export function scheduleDailyScrapes() {
     }
     
     console.log("⏰ [SCHEDULE] Daily seed completed!");
+    
+    // Reset browser to prevent memory leaks from long-running process
+    await resetSharedBrowser();
   };
 
   const scheduleNextRun = () => {
@@ -209,6 +213,9 @@ export function scheduleFrequentDelayScrapes() {
     }
 
     console.log(`✅ [DELAY SCRAPE] Completed all routes`);
+    
+    // Reset browser to prevent memory leaks from long-running process
+    await resetSharedBrowser();
   };
 
   // Start interval - aligned to 10 minute marks
