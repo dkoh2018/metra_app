@@ -1,4 +1,4 @@
-import { getSharedBrowser, globalScrapeQueue } from "./browser.js";
+import { getSharedBrowser, globalScrapeQueue, resetSharedBrowser } from "./browser.js";
 import type { Browser } from "puppeteer";
 import type { CrowdingLevel } from "../types.js";
 
@@ -19,6 +19,39 @@ export const scrapeStats = {
   }
 };
 
+// Circuit Breaker State (Global)
+const circuitBreaker = {
+  failures: 0,
+  maxFailures: 5,
+  trippedUntil: 0, // Timestamp
+  cooldownMs: 30 * 60 * 1000, // 30 minutes
+  
+  get isOpen() {
+    return Date.now() < this.trippedUntil;
+  },
+  
+  trip() {
+    this.trippedUntil = Date.now() + this.cooldownMs;
+    console.error(`💥 [CIRCUIT BREAKER] Tripped! Pausing scrapes for ${this.cooldownMs / 1000 / 60} minutes.`);
+  },
+  
+  reset() {
+    if (this.failures > 0) {
+      console.log("😌 [CIRCUIT BREAKER] Resetting failure count.");
+      this.failures = 0;
+      this.trippedUntil = 0;
+    }
+  },
+  
+  recordFailure() {
+    this.failures++;
+    console.warn(`⚠️ [CIRCUIT BREAKER] Failure ${this.failures}/${this.maxFailures}`);
+    if (this.failures >= this.maxFailures) {
+      this.trip();
+    }
+  }
+};
+
 // Reusable scraping function for both API requests and scheduled background tasks
 export async function scrapeAndCacheCrowding(
   origin: string, 
@@ -32,6 +65,13 @@ export async function scrapeAndCacheCrowding(
   // Check if a scrape is already in progress
   if (scrapingLocks.has(cacheKey)) {
     return scrapingLocks.get(cacheKey);
+  }
+
+  // Check Circuit Breaker
+  if (circuitBreaker.isOpen) {
+    const remainingMin = Math.ceil((circuitBreaker.trippedUntil - Date.now()) / 60000);
+    console.warn(`🛑 [CIRCUIT BREAKER] Scraping paused for ${remainingMin}m due to repeated crashes: ${origin}->${destination}`);
+    throw new Error(`Circuit Breaker Open: Scraping paused for ${remainingMin}m`);
   }
 
   const scrapePromise = (async () => {
@@ -328,6 +368,9 @@ export async function scrapeAndCacheCrowding(
       console.log(`✅ [SCRAPE] SUCCESS: ${origin}->${destination} (${extractedData.crowding.length} trains)`);
       console.log(`📊 [STATS] Success Rate: ${scrapeStats.successRate}% (${scrapeStats.successCount}/${scrapeStats.totalAttempts})`);
       
+      // Reset Circuit Breaker on success
+      circuitBreaker.reset();
+      
       // Only close the PAGE, not the browser
       await page.close();
       page = null;
@@ -350,12 +393,11 @@ export async function scrapeAndCacheCrowding(
       // If the browser crashed/disconnected, force a reset
       if (error.message.includes("Session closed") || error.message.includes("Target closed") || error.message.includes("Protocol error")) {
          console.warn("⚠️ [BROWSER] Browser appears to have crashed. Resetting instance.");
-         if (browser) {
-           browser.close().catch(() => {});
-           // We can't nullify sharedBrowser here easily without cyclical dependency or event bus.
-           // However, browser.ts handles disconnection via the 'disconnected' event listener which nulls it.
-           // But if we want to manually force it, we might need a reset method in browser.ts
-         }
+         
+         // Critical failure - record it
+         circuitBreaker.recordFailure();
+         
+         await resetSharedBrowser();
       }
       
       throw error;

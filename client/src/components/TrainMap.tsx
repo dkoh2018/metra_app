@@ -22,6 +22,7 @@ interface TrainPosition {
   id: string;
   trainNumber: string;
   tripId?: string;
+  lineId?: string; // Added for multi-line support
   latitude: number;
   longitude: number;
   bearing?: number;
@@ -394,7 +395,6 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
       );
 
       // Merge trains from all lines
-      // Add a 'lineId' property to each train if needed, though we track by ID
       const allTrains = responses.flatMap((data, index) => {
         if (data && Array.isArray(data.trains)) {
           return data.trains.map((t: any) => ({ ...t, lineId: lines[index] }));
@@ -407,13 +407,105 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
       setError(null);
     } catch (err: any) {
       console.error('Error fetching train positions:', err);
-      // Don't show error to user if just one failed, try to keep going? 
-      // For now, simple error
-      // setError(err.message); 
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // --- GHOST TRAIN ANIMATION HOOK ---
+  // Interpolates train positions smoothly between 30s updates
+  const useInterpolatedPositions = (rawTrains: TrainPosition[]) => {
+    // Store exact start/target pairs for each train ID
+    const targetsRef = useRef<Record<string, { start: [number, number], target: [number, number], startTime: number }>>({});
+    // The visual state that drives the render loop
+    const [animatedTrains, setAnimatedTrains] = useState<TrainPosition[]>(rawTrains);
+
+    // 1. UPDATE TARGETS when new raw data arrives
+    useEffect(() => {
+        const now = performance.now();
+        const newTargets = { ...targetsRef.current };
+        
+        rawTrains.forEach(train => {
+            // New position from API
+            const newPos: [number, number] = [train.latitude, train.longitude];
+            
+            // Check if we tracking this train
+            if (newTargets[train.id]) {
+                // We have a history.
+                // The START of the new animation is the CURRENT interpolated position (or the old target if undefined)
+                
+                // Note: In a robust system, we'd read the current interpolated value from a ref to avoid jumping.
+                // For simplicity here, we start from the PREVIOUS target (where it should have arrived).
+                // Or better: Start from 'newTargets[train.id].target' which WAS the previous destination.
+                const prevTarget = newTargets[train.id].target;
+                
+                // Only animate if the position actually changed
+                if (prevTarget[0] !== newPos[0] || prevTarget[1] !== newPos[1]) {
+                    newTargets[train.id] = {
+                        start: prevTarget, // Start glide from where it just arrived
+                        target: newPos,    // Glide to new API position
+                        startTime: now
+                    };
+                }
+            } else {
+                // New train appeared! No history.
+                // Start = End (No animation for first appearance)
+                newTargets[train.id] = {
+                    start: newPos,
+                    target: newPos,
+                    startTime: now
+                };
+            }
+        });
+        
+        // Cleanup old trains
+        Object.keys(newTargets).forEach(id => {
+            if (!rawTrains.find(t => t.id === id)) {
+                delete newTargets[id];
+            }
+        });
+
+        targetsRef.current = newTargets;
+    }, [rawTrains]); // Only run when API data updates (every 30s)
+
+    // 2. ANIMATION LOOP (60fps)
+    useEffect(() => {
+        let animationFrameId: number;
+
+        const animate = (time: number) => {
+            const DURATION = 30000; // 30 seconds to glide to next update
+            
+            // Generate visual positions for this frame
+            const frameTrains = rawTrains.map(train => {
+                const animData = targetsRef.current[train.id];
+                if (!animData) return train; // Should not happen if sync logic is right
+
+                const elapsed = time - animData.startTime;
+                
+                // Linear Progress (0 to 1)
+                // Use min(1) to stop at target if update is late
+                const progress = Math.min(1, elapsed / DURATION);
+                
+                // LERP: Start + (End - Start) * Progress
+                const lat = animData.start[0] + (animData.target[0] - animData.start[0]) * progress;
+                const lng = animData.start[1] + (animData.target[1] - animData.start[1]) * progress;
+                
+                return { ...train, latitude: lat, longitude: lng };
+            });
+
+            setAnimatedTrains(frameTrains);
+            animationFrameId = requestAnimationFrame(animate);
+        };
+
+        animationFrameId = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [rawTrains]); // Re-bind loop if train list size changes (though logic handles internal updates)
+
+    return animatedTrains;
+  };
+
+  // Use the hook!
+  const ghostTrains = useInterpolatedPositions(trains);
 
   // Fetch rail line shapes for ALL lines on mount
   useEffect(() => {
@@ -629,35 +721,39 @@ export default function TrainMap({ className = '' }: TrainMapProps) {
             );
           })}
           
-          {/* Train Markers - Snapped to THEIR respective rail line */}
-          {trains.map((train: any) => {
+          {/* Draw Trains - NOW WITH GHOST ANIMATION 👻 */}
+          {ghostTrains.map(train => {
             // Identify which line this train belongs to
-            // We added lineId to train object in fetchPositions
             const trainLineId = train.lineId || (train.tripId && train.tripId.includes('MD-W') ? 'MD-W' : 'UP-NW');
-            const targetLine = railLines[trainLineId] || railLines['UP-NW']; // Fallback
+            const targetLine = railLines[trainLineId] || railLines['UP-NW'];
 
-            // Snap train to the rail line and get track bearing
+            // Snap interpolated train to the rail line
             const { snappedLat, snappedLng, trackBearing } = snapToTrack(
               train.latitude,
               train.longitude,
-              targetLine || [], // If line not loaded yet, snap might fail/return original
+              targetLine || [],
               train.direction || 'unknown'
             );
-            
+
             return (
-                <Marker 
-                  key={train.id} 
-                  position={[snappedLat, snappedLng]} 
-                  icon={createTrainIcon(train.trainNumber, trackBearing, train.direction)}
-                  zIndexOffset={100} // Above stations
-                  eventHandlers={{
-                    click: () => {
-                      if (train.tripId && train.tripId !== selectedTripId) {
-                        fetchTripSchedule(train.tripId);
-                      }
-                    }
-                  }}
-                >
+              <Marker
+                key={train.id}
+                position={[snappedLat, snappedLng]}
+                icon={createTrainIcon(
+                  train.trainNumber, 
+                  trackBearing, 
+                  train.direction
+                )}
+                zIndexOffset={100}
+                eventHandlers={{
+                  click: () => {
+                     if (train.tripId) {
+                       fetchTripSchedule(train.tripId);
+                     }
+                  }
+                }}
+              >
+        
                 <Popup 
                   className="train-popup" 
                   minWidth={280} 

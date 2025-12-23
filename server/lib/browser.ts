@@ -231,3 +231,26 @@ export async function getSharedBrowser(): Promise<Browser> {
 
   return sharedBrowser;
 }
+
+export async function resetSharedBrowser(): Promise<void> {
+  console.log("♻️ [BROWSER] Resetting shared browser instance...");
+  
+  // 1. Mark as closing
+  if (sharedBrowser) {
+    try {
+      if (sharedBrowser.process()?.pid) {
+         console.log(`♻️ [BROWSER] Killing process ${sharedBrowser.process()?.pid}`);
+         process.kill(sharedBrowser.process()!.pid!, 'SIGKILL');
+      }
+      await sharedBrowser.close().catch(() => {});
+    } catch (e: any) {
+      console.warn("⚠️ [BROWSER] Error closing browser:", e.message);
+    }
+  }
+
+  sharedBrowser = null;
+  
+  // Wait a moment for OS to clean up
+  await new Promise(r => setTimeout(r, 1000));
+  console.log("✅ [BROWSER] Browser instance reset complete.");
+}

@@ -176,7 +176,7 @@ export function scheduleFrequentDelayScrapes() {
     { origin: 'CUS', destination: 'WESTMONT', line: 'BNSF' }
   ];
 
-  const SCRAPE_INTERVAL_MS = 7 * 60 * 1000; // 7 minutes
+  const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   const CONCURRENCY = 2; // Process 2 routes at a time to avoid overwhelming
 
   const runDelayScrape = async () => {
