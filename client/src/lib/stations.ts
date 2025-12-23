@@ -53,6 +53,7 @@ export const STATIONS: Record<string, Station> = {
   // UP-N Line (Union Pacific North)
 
   ravenswood: { lat: 41.9708, lng: -87.6749, name: 'Ravenswood', gtfsId: 'RAVENSWOOD', line: 'UP-N', terminal: 'OTC' },
+  petersonRidge: { lat: 41.9911111, lng: -87.6750000, name: 'Peterson/Ridge', gtfsId: 'PETERSON', line: 'UP-N', terminal: 'OTC' },
   rogersPark: { lat: 42.0093, lng: -87.6755, name: 'Rogers Park', gtfsId: 'ROGERS_PK', line: 'UP-N', terminal: 'OTC' },
   mainSt: { lat: 42.0378, lng: -87.6789, name: 'Evanston (Main St)', gtfsId: 'MAIN_ST', line: 'UP-N', terminal: 'OTC' },
   davisSt: { lat: 42.0464, lng: -87.6835, name: 'Evanston (Davis St)', gtfsId: 'DAVIS', line: 'UP-N', terminal: 'OTC' },
@@ -97,6 +98,8 @@ export const STATIONS: Record<string, Station> = {
   harlemAve: { lat: 41.8313889, lng: -87.8019444, name: 'Harlem Ave', gtfsId: 'HARLEM', line: 'BNSF', terminal: 'CUS' },
   berwyn: { lat: 41.8330556, lng: -87.7936111, name: 'Berwyn', gtfsId: 'BERWYN', line: 'BNSF', terminal: 'CUS' },
   lavergne: { lat: 41.8355556, lng: -87.7833333, name: 'Lavergne', gtfsId: 'LAVERGNE', line: 'BNSF', terminal: 'CUS' },
+  westernAveBNSF: { lat: 41.8577778, lng: -87.6852778, name: 'Western Ave', gtfsId: 'BNWESTERN', line: 'BNSF', terminal: 'CUS' },
+  halsted: { lat: 41.8602778, lng: -87.6472222, name: 'Halsted', gtfsId: 'HALSTED', line: 'BNSF', terminal: 'CUS' },
 
   // UP-W Line (Union Pacific West)
   elburn: { lat: 41.8905556, lng: -88.4638889, name: 'Elburn', isTerminal: true, gtfsId: 'ELBURN', line: 'UP-W', terminal: 'OTC' },
