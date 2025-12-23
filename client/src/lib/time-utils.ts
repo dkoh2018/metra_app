@@ -32,22 +32,29 @@ export function formatPredictedTimeDisplay(timeStr?: string | null): string | nu
   // If it already has AM/PM, return as is
   if (timeStr.toLowerCase().includes('m')) return timeStr;
   
-  // Handle ISO string (e.g. 2025-12-18T23:52:00)
+  // Handle ISO string (e.g. 2025-12-18T23:52:00 or 2025-12-18T16:02:50.705Z)
   if (timeStr.includes('T')) {
     const date = new Date(timeStr);
     if (!isNaN(date.getTime())) {
-      let h = date.getHours();
-      const m = date.getMinutes();
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const h12 = h % 12 || 12;
-      return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+      // FORCE Chicago Timezone
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Chicago',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      }).format(date);
     }
   }
   
   // Otherwise assume HH:MM:SS or HH:MM and convert to 12h
   const [hStr, mStr] = timeStr.split(':');
-  const h = parseInt(hStr);
+  let h = parseInt(hStr);
   const m = parseInt(mStr);
+  
+  // Fix 24:xx, 25:xx, 26:xx -> 00:xx, 01:xx
+  if (h >= 24) {
+    h = h % 24;
+  }
   
   if (isNaN(h) || isNaN(m)) return timeStr;
   

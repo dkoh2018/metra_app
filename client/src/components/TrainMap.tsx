@@ -473,6 +473,7 @@ const TrainMarker = ({
                   return stopMinutes > currentMinutes;
                 }).map((stop, outputIndex) => {
                   // Find station name
+                  // Find station name
                   const stationEntry = Object.values(STATIONS).find(s => s.gtfsId === stop.stop_id);
                   
                   const getStationName = (stopId: string) => {
@@ -486,6 +487,48 @@ const TrainMarker = ({
 
                   const stationName = getStationName(stop.stop_id);
                   const isNextStop = outputIndex === 0;
+
+                  // Robust time formatting
+                  const formatTime = (timeStr: string) => {
+                      if (!timeStr) return '--:--';
+                      try {
+                          // Handle ISO timestamps (from realtime_updates)
+                          // Example: 2025-12-23T07:18:14.000Z
+                          if (timeStr.includes('T') || timeStr.includes('Z')) {
+                            const date = new Date(timeStr);
+                            if (isNaN(date.getTime())) return timeStr;
+                            
+                            // FORCE Chicago Timezone
+                            return new Intl.DateTimeFormat('en-US', {
+                              timeZone: 'America/Chicago',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              hour12: true
+                            }).format(date);
+                          }
+
+                          // Handle GTFS HH:MM:SS (potentially > 24 for overnight)
+                          const parts = timeStr.split(':');
+                          if (parts.length < 2) return timeStr; 
+                          
+                          let h = parseInt(parts[0]);
+                          const m = parseInt(parts[1]);
+                          
+                          if (isNaN(h) || isNaN(m)) return timeStr;
+                          
+                          // Fix 24:xx, 25:xx, 26:xx -> 00:xx, 01:xx, 02:xx
+                          if (h >= 24) {
+                            h = h % 24;
+                          }
+                          
+                          const ampm = h >= 12 ? 'PM' : 'AM';
+                          const h12 = h % 12 || 12;
+                          
+                          return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+                      } catch (e) {
+                          return timeStr;
+                      }
+                  };
                   
                   // Calculate delay color logic here (omitted for brevity, assume default text color if logic complex)
                   // For now, simpler rendering to ensure it works
@@ -497,7 +540,7 @@ const TrainMarker = ({
                           <span className={`text-xs truncate ${isNextStop ? 'font-bold text-blue-900' : (stationEntry?.isHighlight ? 'font-bold text-zinc-800' : 'text-zinc-600')}`}>{stationName}</span>
                       </div>
                       <div className="text-xs font-mono font-medium text-zinc-500">
-                        {stop.predicted_arrival || stop.arrival_time}
+                        {formatTime(stop.predicted_arrival || stop.arrival_time)}
                       </div>
                     </div>
                   );
