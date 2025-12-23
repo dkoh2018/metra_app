@@ -146,7 +146,7 @@ export function scheduleDailyScrapes() {
         console.log("❄️ [SCHEDULE] Cold start detected (low data). Triggering immediate initial seed...");
         runScheduledScrape();
       } else {
-        // Warm start - data exists
+        // Warm start - data exist
         console.log("✅ [SCHEDULE] Data exists. Skipping immediate seed to save resources.");
       }
     } catch (err: any) {

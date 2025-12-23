@@ -182,6 +182,9 @@ export async function ensureChromeExecutable(): Promise<string | null> {
   }
 }
 
+// Lock to prevent multiple simultaneous launch attempts
+let browserLaunchPromise: Promise<Browser> | null = null;
+
 export async function getSharedBrowser(): Promise<Browser> {
   // If closing, wait for it to finish
   if (browserClosingPromise) {
@@ -198,38 +201,54 @@ export async function getSharedBrowser(): Promise<Browser> {
     return sharedBrowser;
   }
 
-  console.log("🚀 [BROWSER] Launching NEW Shared Browser instance...");
-  
-  const puppeteer = (await import("puppeteer")).default;
-  const executablePath = await ensureChromeExecutable();
-  
-  if (!executablePath) {
-    throw new Error("Chrome executable not found cannot launch browser");
+  // If a launch is already in progress, wait for it
+  if (browserLaunchPromise) {
+    return browserLaunchPromise;
   }
 
-  sharedBrowser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage', // Critical for Docker/Railway
-      '--disable-gpu',
-      '--no-zygote',             // Spawns fewer processes
-      '--single-process',         // (Optional) forces single process, good for very low memory but less stable
-      '--disable-blink-features=AutomationControlled'
-    ],
-    executablePath,
-    timeout: 30000,
-    env: { ...process.env, TZ: 'America/Chicago' }
-  }) as unknown as Browser;
+  console.log("🚀 [BROWSER] Launching NEW Shared Browser instance...");
+  
+  browserLaunchPromise = (async () => {
+    try {
+      const puppeteer = (await import("puppeteer")).default;
+      const executablePath = await ensureChromeExecutable();
+      
+      if (!executablePath) {
+        throw new Error("Chrome executable not found cannot launch browser");
+      }
 
-  // Cleanup handler if browser crashes or disconnects unexpectedly
-  sharedBrowser.on('disconnected', () => {
-    console.log("🔌 [BROWSER] Shared browser disconnected/closed!");
-    sharedBrowser = null;
-  });
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage', // Critical for Docker/Railway
+          '--disable-gpu',
+          '--no-zygote',             // Spawns fewer processes
+          '--single-process',         // (Optional) forces single process, good for very low memory but less stable
+          '--disable-blink-features=AutomationControlled'
+        ],
+        executablePath,
+        timeout: 30000,
+        env: { ...process.env, TZ: 'America/Chicago' }
+      }) as unknown as Browser;
 
-  return sharedBrowser;
+      // Cleanup handler if browser crashes or disconnects unexpectedly
+      browser.on('disconnected', () => {
+        console.log("🔌 [BROWSER] Shared browser disconnected/closed!");
+        if (sharedBrowser === browser) {
+           sharedBrowser = null;
+        }
+      });
+
+      sharedBrowser = browser;
+      return browser;
+    } finally {
+      browserLaunchPromise = null;
+    }
+  })();
+
+  return browserLaunchPromise;
 }
 
 export async function resetSharedBrowser(): Promise<void> {
